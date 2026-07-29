@@ -35,7 +35,7 @@ Muitos profissionais qualificados carecem de uma plataforma para se destacarem. 
 - [Contribuindo](#contribuindo)
 - [Licença](#licença)
 - [Guia de Início Rápido](packages/api/QUICK_START_GUIDE.md)
-- [Documentação da API](packages/api/DOCUMENTATION.json)
+- [Documentação da API](packages/api/API_REFERENCE.md)
 - [Exemplos cURL da API](packages/api/CURL_EXAMPLES.md)
 - [Política de Segurança](packages/api/SECURITY.md)
 - [Guia de Contribuição](CONTRIBUTING.md)

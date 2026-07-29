@@ -3,7 +3,7 @@
  * Mirrors the on-chain escrow lifecycle in the DB and notifies parties on transitions.
  */
 import { db } from '../db.js'
-import { AppError } from './AppError.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 import { dispatchNotification } from './notification.service.js'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -27,9 +27,9 @@ export async function createEscrow(data: {
   expiresAt: Date
   txId?: string
 }) {
-  if (data.amountXlm <= 0) throw new AppError('amountXlm must be greater than 0', 400)
-  if (data.expiresAt <= new Date()) throw new AppError('expiresAt must be in the future', 400)
-  if (data.payerId === data.payeeId) throw new AppError('Payer and payee must be different', 400)
+  if (data.amountXlm <= 0) throw new AppError('amountXlm must be greater than 0', 400, true, ErrorCode.VALIDATION_ERROR)
+  if (data.expiresAt <= new Date()) throw new AppError('expiresAt must be in the future', 400, true, ErrorCode.VALIDATION_ERROR)
+  if (data.payerId === data.payeeId) throw new AppError('Payer and payee must be different', 400, true, ErrorCode.VALIDATION_ERROR)
 
   const record = await db.escrowRecord.create({ data: { ...data, status: 'pending' } })
 
@@ -46,11 +46,13 @@ export async function createEscrow(data: {
 
 /**
  * Activate an escrow (funds confirmed on-chain).
+ * Only the payer (or admin) should call this.
  */
-export async function activateEscrow(id: string, txId: string) {
+export async function activateEscrow(id: string, txId: string, callerId: string, callerRole: string) {
   const record = await db.escrowRecord.findUnique({ where: { id } })
-  if (!record) throw new AppError('Escrow not found', 404)
-  if (record.status !== 'pending') throw new AppError('Only pending escrows can be activated', 400)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
+  if (record.status !== 'pending') throw new AppError('Only pending escrows can be activated', 400, true, ErrorCode.VALIDATION_ERROR)
+  if (callerRole !== 'admin' && record.payerId !== callerId) throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
 
   const updated = await db.escrowRecord.update({
     where: { id },
@@ -74,9 +76,9 @@ export async function activateEscrow(id: string, txId: string) {
  */
 export async function releaseEscrow(id: string, callerId: string, callerRole: string) {
   const record = await db.escrowRecord.findUnique({ where: { id } })
-  if (!record) throw new AppError('Escrow not found', 404)
-  if (record.status !== 'active') throw new AppError('Only active escrows can be released', 400)
-  if (callerRole !== 'admin' && record.payerId !== callerId) throw new AppError('Forbidden', 403)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
+  if (record.status !== 'active') throw new AppError('Only active escrows can be released', 400, true, ErrorCode.VALIDATION_ERROR)
+  if (callerRole !== 'admin' && record.payerId !== callerId) throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
 
   const updated = await db.escrowRecord.update({
     where: { id },
@@ -99,14 +101,14 @@ export async function releaseEscrow(id: string, callerId: string, callerRole: st
  */
 export async function cancelEscrow(id: string, callerId: string, callerRole: string) {
   const record = await db.escrowRecord.findUnique({ where: { id } })
-  if (!record) throw new AppError('Escrow not found', 404)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
   if (record.status !== 'active' && record.status !== 'pending') {
-    throw new AppError('Only pending/active escrows can be cancelled', 400)
+    throw new AppError('Only pending/active escrows can be cancelled', 400, true, ErrorCode.VALIDATION_ERROR)
   }
   const now = new Date()
-  if (callerRole !== 'admin' && record.payerId !== callerId) throw new AppError('Forbidden', 403)
+  if (callerRole !== 'admin' && record.payerId !== callerId) throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
   if (callerRole !== 'admin' && record.expiresAt > now) {
-    throw new AppError('Escrow is still within the lock period', 400)
+    throw new AppError('Escrow is still within the lock period', 400, true, ErrorCode.VALIDATION_ERROR)
   }
 
   const updated = await db.escrowRecord.update({
@@ -130,9 +132,9 @@ export async function getEscrow(id: string, callerId: string, callerRole: string
     where: { id },
     include: { disputes: true },
   })
-  if (!record) throw new AppError('Escrow not found', 404)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
   if (callerRole !== 'admin' && record.payerId !== callerId && record.payeeId !== callerId) {
-    throw new AppError('Forbidden', 403)
+    throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
   }
   return record
 }
@@ -164,10 +166,10 @@ export async function fileEscrowDispute(
   evidence?: string,
 ) {
   const record = await db.escrowRecord.findUnique({ where: { id: escrowId } })
-  if (!record) throw new AppError('Escrow not found', 404)
-  if (record.payerId !== filedById && record.payeeId !== filedById) throw new AppError('Forbidden', 403)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
+  if (record.payerId !== filedById && record.payeeId !== filedById) throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
   if (record.status === 'released' || record.status === 'cancelled') {
-    throw new AppError('Cannot dispute a completed escrow', 400)
+    throw new AppError('Cannot dispute a completed escrow', 400, true, ErrorCode.VALIDATION_ERROR)
   }
 
   const [dispute] = await db.$transaction([
@@ -201,7 +203,7 @@ export async function resolveEscrowDispute(
     where: { id: disputeId },
     include: { escrow: true },
   })
-  if (!dispute) throw new AppError('Dispute not found', 404)
+  if (!dispute) throw new AppError('Dispute not found', 404, true, ErrorCode.NOT_FOUND)
 
   const updated = await db.escrowDispute.update({
     where: { id: disputeId },

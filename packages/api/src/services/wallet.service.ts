@@ -1,8 +1,18 @@
 import { db } from '../db.js'
-import { AppError } from '../utils/AppError.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 
 const HORIZON_URL = process.env.HORIZON_URL || 'https://horizon-testnet.stellar.org'
 const FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org/bump_sequence'
+
+/**
+ * Maps an upstream Horizon/friendbot HTTP status to an application ErrorCode
+ * so failures surface with a consistent error contract regardless of origin.
+ */
+function upstreamErrorCode(status: number): ErrorCode {
+  if (status === 404) return ErrorCode.NOT_FOUND
+  if (status >= 500) return ErrorCode.SERVICE_UNAVAILABLE
+  return ErrorCode.VALIDATION_ERROR
+}
 
 /**
  * Fetch account balance and sequence from Horizon.
@@ -12,11 +22,16 @@ export async function getAccountInfo(publicKey: string) {
   const response = await fetch(`${HORIZON_URL}/accounts/${publicKey}`)
 
   if (response.status === 404) {
-    throw new AppError('Account not found on Stellar network', 404)
+    throw new AppError('Account not found on Stellar network', 404, true, ErrorCode.NOT_FOUND)
   }
 
   if (!response.ok) {
-    throw new AppError(`Stellar network error: ${response.statusText}`, response.status)
+    throw new AppError(
+      `Stellar network error: ${response.statusText}`,
+      response.status,
+      true,
+      upstreamErrorCode(response.status),
+    )
   }
 
   const data = (await response.json()) as {
@@ -68,7 +83,7 @@ export async function getUserBalance(userId: string) {
   })
 
   if (!account) {
-    throw new AppError('Stellar account not linked', 404)
+    throw new AppError('Stellar account not linked', 404, true, ErrorCode.NOT_FOUND)
   }
 
   return {
@@ -96,7 +111,7 @@ export async function buildUnsignedTx(
   })
 
   if (!account) {
-    throw new AppError('Source account not found', 404)
+    throw new AppError('Source account not found', 404, true, ErrorCode.NOT_FOUND)
   }
 
   // Fetch latest sequence to avoid gaps
@@ -131,7 +146,12 @@ export async function broadcastTransaction(signedXdr: string) {
 
   if (!response.ok) {
     const error = (await response.json()) as { title?: string; detail?: string }
-    throw new AppError(`Broadcast failed: ${error.detail || error.title}`, response.status)
+    throw new AppError(
+      `Broadcast failed: ${error.detail || error.title}`,
+      response.status,
+      true,
+      upstreamErrorCode(response.status),
+    )
   }
 
   const result = (await response.json()) as { hash: string; id: string }
@@ -153,7 +173,12 @@ export async function pollTransactionStatus(txHash: string) {
   }
 
   if (!response.ok) {
-    throw new AppError('Failed to fetch transaction status', response.status)
+    throw new AppError(
+      'Failed to fetch transaction status',
+      response.status,
+      true,
+      upstreamErrorCode(response.status),
+    )
   }
 
   const tx = (await response.json()) as { successful: boolean; result_code: string }
@@ -180,6 +205,8 @@ export async function fundTestnetAccount(publicKey: string) {
     throw new AppError(
       `Friendbot failed: ${error.error || response.statusText}`,
       response.status,
+      true,
+      upstreamErrorCode(response.status),
     )
   }
 
@@ -201,7 +228,7 @@ export async function linkStellarAccount(userId: string, publicKey: string) {
   })
 
   if (existing && existing.userId !== userId) {
-    throw new AppError('Wallet already linked to another account', 400)
+    throw new AppError('Wallet already linked to another account', 409, true, ErrorCode.CONFLICT)
   }
 
   return syncStellarAccount(userId, publicKey)
@@ -223,7 +250,12 @@ export async function getAccountTransactions(
   )
 
   if (!response.ok) {
-    throw new AppError('Failed to fetch transactions', response.status)
+    throw new AppError(
+      'Failed to fetch transactions',
+      response.status,
+      true,
+      upstreamErrorCode(response.status),
+    )
   }
 
   const data = (await response.json()) as {

@@ -1,5 +1,5 @@
 import TipModal from "@/components/TipModal";
-import TransactionHistory from "@/components/TransactionHistory";
+import TransactionList from "@/components/TransactionList";
 
 interface Props {
   workerName: string;
@@ -25,7 +25,7 @@ export function WorkerTipSection({ workerName, walletAddress }: Props) {
         </div>
         <TipModal workerName={workerName} walletAddress={walletAddress} />
       </div>
-      <TransactionHistory walletAddress={walletAddress} />
+      <TransactionList walletAddress={walletAddress} />
     </>
   );
 }

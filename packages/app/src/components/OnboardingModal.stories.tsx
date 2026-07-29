@@ -13,15 +13,11 @@ type Story = StoryObj<typeof OnboardingModal>
 export const Default: Story = {
   args: {
     isOpen: true,
-    onComplete: () => {},
-    onSkip: () => {},
   },
 }
 
 export const Closed: Story = {
   args: {
     isOpen: false,
-    onComplete: () => {},
-    onSkip: () => {},
   },
 }

@@ -1,12 +1,12 @@
 import { db } from '../db.js'
-import { AppError } from './AppError.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 
 /**
  * File a new dispute against a worker.
  */
 export async function fileDispute(workerId: string, filedById: string, reason: string, evidence?: string) {
   const worker = await db.worker.findUnique({ where: { id: workerId } })
-  if (!worker) throw new AppError('Worker not found', 404)
+  if (!worker) throw new AppError('Worker not found', 404, true, ErrorCode.NOT_FOUND)
 
   return db.dispute.create({
     data: { workerId, filedById, reason, evidence },
@@ -40,8 +40,8 @@ export async function getDispute(id: string, userId: string, role: string) {
     where: { id },
     include: { worker: { select: { id: true, name: true } }, filedBy: { select: { id: true, firstName: true, lastName: true } } },
   })
-  if (!dispute) throw new AppError('Dispute not found', 404)
-  if (role !== 'admin' && dispute.filedById !== userId) throw new AppError('Forbidden', 403)
+  if (!dispute) throw new AppError('Dispute not found', 404, true, ErrorCode.NOT_FOUND)
+  if (role !== 'admin' && dispute.filedById !== userId) throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
   return dispute
 }
 
@@ -50,7 +50,10 @@ export async function getDispute(id: string, userId: string, role: string) {
  */
 export async function resolveDispute(id: string, adminId: string, status: 'resolved' | 'dismissed' | 'under_review', resolution?: string) {
   const dispute = await db.dispute.findUnique({ where: { id } })
-  if (!dispute) throw new AppError('Dispute not found', 404)
+  if (!dispute) throw new AppError('Dispute not found', 404, true, ErrorCode.NOT_FOUND)
+  if (dispute.status === 'resolved' || dispute.status === 'dismissed') {
+    throw new AppError('Dispute has already been resolved', 409, true, ErrorCode.CONFLICT)
+  }
 
   return db.dispute.update({
     where: { id },

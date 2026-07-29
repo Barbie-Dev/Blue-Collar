@@ -12,6 +12,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 - [Issue & PR Templates](#issue--pr-templates)
 - [Pull Request Process](#pull-request-process)
 - [Code Style](#code-style)
+- [Error Handling & Logging](#error-handling--logging)
 - [Running Tests](#running-tests)
 - [Translations](#translations)
 
@@ -137,6 +138,7 @@ Fill in all relevant sections. The templates include checklists specific to the 
 - 2-space indent, double quotes
 - Run `pnpm build` to catch type errors before pushing
 - Run `pnpm test` to ensure no regressions
+- All input validation schemas live in `src/validations/`. Do not create a separate `validators/` directory — add new Zod schemas as a file there and re-export them from `src/validations/index.ts`.
 
 ### Contracts (Rust)
 
@@ -146,6 +148,30 @@ Fill in all relevant sections. The templates include checklists specific to the 
 ### App (Next.js)
 
 See [packages/app/CONTRIBUTING.md](./packages/app/CONTRIBUTING.md) for frontend-specific conventions.
+
+---
+
+## Error Handling & Logging
+
+Both packages follow a single written standard: **[docs/ERROR_HANDLING_AND_LOGGING.md](./docs/ERROR_HANDLING_AND_LOGGING.md)**.
+Read it before adding an error path or a log line. In short:
+
+- **API:** throw `AppError` with an explicit `ErrorCode` and let the global `errorHandler` format the
+  response. Do not add new `try/catch` blocks in controllers that build their own JSON, and do not
+  add new callers of `handleError` or `sendError` — both drop `errorCode` and `traceId`.
+- **API logging:** use `createServiceLogger(name)` from `utils/logger.js`. Pass structured fields as
+  the first argument and the message as the second. No `console.*` in application code. 4xx logs at
+  `warn` or below; only 5xx logs at `error`.
+- **Correlation IDs:** the OpenTelemetry trace ID is the correlation ID. Read it with `getTraceId()`;
+  never invent a per-request UUID. Work that leaves the request context (queues, workers) must carry
+  `traceId` in its payload.
+- **App:** render `parseApiError(err).message` from `lib/errors.ts` — never a raw thrown message —
+  and branch on `code`/`retryable`, not on message text.
+- **Never log PII:** no bodies, headers, tokens, emails, or IP addresses.
+
+The document ends with a [review checklist](./docs/ERROR_HANDLING_AND_LOGGING.md#review-checklist);
+reviewers are expected to use it. `packages/api/src/__tests__/error-logging-conventions.test.ts`
+fails the build if the document and the code disagree.
 
 ---
 

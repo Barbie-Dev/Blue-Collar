@@ -13,6 +13,9 @@ use soroban_sdk::{
 /// Maximum allowed fee: 10000 bps = 100%.
 pub const MAX_FEE_BPS: u32 = 10000;
 
+/// Event schema version — bump when adding/removing/renaming events.
+pub const VERSION: u32 = 1;
+
 // =============================================================================
 // Roles
 // =============================================================================
@@ -303,6 +306,11 @@ impl FeeDistributionContract {
 
         env.events()
             .publish((symbol_short!("FeeWdraw"), token, amount), ());
+    }
+
+    /// Return the event schema version.
+    pub fn version(_env: Env) -> u32 {
+        VERSION
     }
 
     /// Upgrade contract WASM.

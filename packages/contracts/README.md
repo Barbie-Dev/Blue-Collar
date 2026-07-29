@@ -6,6 +6,16 @@ Stellar **Soroban** smart contracts for the BlueCollar protocol, written in Rust
 |---|---|
 | `registry` | On-chain worker registrations, curator management, staking, badges |
 | `market` | Token tips, escrow payments, arbitration, protocol fee |
+| `dispute` | Full dispute lifecycle — file → evidence → arbitrator decision → settle |
+| `fee_distribution` | Protocol fee collection and percentage-based distribution to multiple recipients |
+| `insurance_pool` | On-chain insurance pool for worker payments — contributions, claims, rebalancing |
+
+Every public function on every contract is documented with rustdoc (`///`) comments in
+its `lib.rs`. The consolidated, per-contract reference — function signatures, storage
+maps, event catalogue, and the common auth/TTL/upgrade patterns shared across all five
+contracts — lives in **[docs/CONTRACTS.md](../../docs/CONTRACTS.md)**. See
+[VERSIONING.md](./VERSIONING.md) for how interface changes are versioned across
+releases (distinct from the WASM upgrade mechanics below).
 
 ---
 
@@ -53,6 +63,46 @@ cargo llvm-cov --workspace --lcov --output-path target/coverage/lcov.info --fail
 ```
 
 The CI job uploads the generated coverage report as an artifact from `packages/contracts/target/coverage`.
+
+---
+
+## Testing
+
+### Unit & Integration Tests
+
+Run the standard test suite:
+
+```bash
+cd packages/contracts
+cargo test --workspace
+```
+
+### Fuzz Testing
+
+The `fuzz` crate includes property-based tests using `proptest` that verify critical contract invariants
+with randomly generated inputs. These tests focus on amount validation, authorization edge cases,
+and state transitions for payment, escrow, and registry contracts.
+
+Run property-based fuzz tests:
+
+```bash
+cd packages/contracts/contracts/fuzz
+cargo test --test "*_fuzz" --features testutils
+```
+
+**Test coverage includes:**
+- `payment_fuzz.rs` — Lock/release/refund payments, fee deduction, amount safety
+- `escrow_fuzz.rs` — Create/release/cancel escrow, expiry handling, state transitions
+- `registry_fuzz.rs` — Worker registration, reputation updates, delegation
+- `market_fuzz.rs` — Tip transfers, escrow creation, fee calculations
+- `upgrade_fuzz.rs` — Contract upgrade mechanics
+
+**Key invariants tested:**
+- ✓ Amounts never overflow or underflow
+- ✓ Zero amounts are rejected
+- ✓ Fee calculations remain correct across all fee rates (0–500 bps)
+- ✓ Authorization checks prevent unauthorized actions
+- ✓ State transitions preserve invariants (e.g., locked payments cannot be double-released)
 
 ---
 
@@ -176,3 +226,14 @@ lets anyone refresh a worker entry without special permissions.
 
 See [SECURITY.md](./SECURITY.md) for the full threat model, auth table, overflow
 analysis, and migration pattern.
+
+## Further reading
+
+| Document | Covers |
+|---|---|
+| [docs/CONTRACTS.md](../../docs/CONTRACTS.md) | Full interface reference: functions, storage, events, per-contract |
+| [VERSIONING.md](./VERSIONING.md) | Interface/semver versioning policy for public functions |
+| [UPGRADE_GUIDE.md](./UPGRADE_GUIDE.md) | WASM upgrade runbook (build → install → invoke `upgrade`/`migrate`) |
+| [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md) | Integrating against the deployed contracts |
+| [SECURITY.md](./SECURITY.md) | Threat model, auth table, overflow analysis |
+| [CERTIFICATION_TRACKING.md](./CERTIFICATION_TRACKING.md) | Registry's certification sub-API in depth |

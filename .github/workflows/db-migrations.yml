@@ -1,0 +1,93 @@
+name: DB Migrations
+
+# Verify Prisma migrations apply cleanly forward against a fresh database
+# in CI. Detects drift, validates seed scripts, and catches missing
+# migration_lock.toml.
+# Closes #817
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bluecollar
+          POSTGRES_PASSWORD: bluecollar
+          POSTGRES_DB: bluecollar
+        options: >-
+          --health-cmd pg_isready -U bluecollar -d bluecollar
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for destructive migrations (#835)
+        run: bash .github/scripts/check-destructive-migrations.sh
+        env:
+          BASE_BRANCH: origin/main
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        run: npm install -g pnpm@8
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: packages/api
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: packages/api
+        env:
+          DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+
+      - name: Apply all migrations
+        run: npx prisma migrate deploy
+        working-directory: packages/api
+        env:
+          DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+
+      - name: Validate schema matches database
+        run: npx prisma db validate
+        working-directory: packages/api
+        env:
+          DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+
+      - name: Detect drift (diff migrations vs schema)
+        run: |
+          npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --exit-code
+        working-directory: packages/api
+        env:
+          DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+
+      - name: Run seed script
+        run: npx tsx src/database/seed.ts
+        working-directory: packages/api
+        env:
+          DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+          SEED_ADMIN_PASSWORD: TestAdminPass1
+          SEED_CURATOR_PASSWORD: TestCuratorPass1
+          NODE_ENV: test

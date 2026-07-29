@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import ReviewCard from "./ReviewCard";
 import ReviewForm from "./ReviewForm";
 import RatingBreakdown from "./RatingBreakdown";
@@ -11,6 +11,13 @@ import { getWorkerReviews } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 const PAGE_SIZE = 5;
+
+const SORT_LABELS: Record<SortOption, string> = {
+  newest: "newest first",
+  oldest: "oldest first",
+  highest: "highest rated first",
+  lowest: "lowest rated first",
+};
 
 interface Props {
   workerId: string;
@@ -26,7 +33,7 @@ export default function ReviewsSection({
   reviewCount,
   averageRating,
   distribution,
-}: Props) {
+}: ReviewsSectionProps) {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<Review[]>(initialReviews);
   const [count, setCount] = useState<number>(reviewCount);
@@ -34,6 +41,13 @@ export default function ReviewsSection({
   const [filterLoading, setFilterLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [sort, setSort] = useState<SortOption>("newest");
+  /** Announced politely when the list changes under the user without a page move. */
+  const [announcement, setAnnouncement] = useState("");
+
+  const headingId = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+  /** Index of the first item revealed by "Load more", so focus can land on it. */
+  const focusIndexRef = useRef<number | null>(null);
 
   const hasReviewed = !!user && reviews.some((r) => r.authorId === user.id);
 
@@ -41,12 +55,35 @@ export default function ReviewsSection({
     setReviews((prev) => [review, ...prev]);
     setCount((c) => c + 1);
     setVisibleCount((v) => v + 1);
+    setAnnouncement("Your review was posted.");
   };
+
+  const handleSortChange = (next: SortOption) => {
+    setSort(next);
+    setAnnouncement(`Reviews sorted by ${SORT_LABELS[next]}.`);
+  };
+
+  const handleLoadMore = () => {
+    // Revealing items below the button leaves keyboard and screen reader users
+    // at the bottom of the list with no indication anything appeared, so move
+    // focus to the first new review once it renders.
+    focusIndexRef.current = visibleCount;
+    setVisibleCount((v) => v + PAGE_SIZE);
+  };
+
+  useEffect(() => {
+    const index = focusIndexRef.current;
+    if (index === null) return;
+    focusIndexRef.current = null;
+    const target = listRef.current?.children[index] as HTMLElement | undefined;
+    target?.focus();
+  }, [visibleCount]);
 
   const handleFilterChange = async (rating: number | null) => {
     if (rating === null) {
       setFilteredReviews(null);
       setVisibleCount(PAGE_SIZE);
+      setAnnouncement("Rating filter cleared. Showing all reviews.");
       return;
     }
     setFilterLoading(true);
@@ -54,8 +91,12 @@ export default function ReviewsSection({
       const res = await getWorkerReviews(workerId, { rating: String(rating), limit: "50" });
       setFilteredReviews(res.data);
       setVisibleCount(PAGE_SIZE);
+      setAnnouncement(
+        `Showing ${res.data.length} ${rating}-star review${res.data.length !== 1 ? "s" : ""}.`,
+      );
     } catch {
       setFilteredReviews(null);
+      setAnnouncement("Could not load filtered reviews. Showing all reviews.");
     } finally {
       setFilterLoading(false);
     }
@@ -83,13 +124,22 @@ export default function ReviewsSection({
   const hasMore = visibleCount < sorted.length;
 
   return (
-    <div className="mt-8 border-t pt-6 dark:border-gray-800">
+    <section
+      aria-labelledby={headingId}
+      className="mt-8 border-t pt-6 dark:border-gray-800"
+    >
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+        <h2 id={headingId} className="text-base font-semibold text-gray-900 dark:text-gray-100">
           Reviews {count > 0 && `(${count})`}
         </h2>
-        {count > 0 && <ReviewSortFilter sort={sort} onSortChange={setSort} />}
+        {count > 0 && <ReviewSortFilter sort={sort} onSortChange={handleSortChange} />}
       </div>
+
+      {/* Sorting, filtering and loading all mutate the list in place; without a
+          live region a screen reader user gets no feedback that anything moved. */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </p>
 
       {count > 0 && (
         <RatingBreakdown
@@ -104,24 +154,36 @@ export default function ReviewsSection({
         {hasReviewed ? (
           <p className="text-sm text-gray-500 italic dark:text-gray-400">You have already reviewed this worker.</p>
         ) : (
-          <>
+          // EmptyState's "Write a Review" CTA links here; the id must exist for
+          // that skip target to work.
+          <div id="review-form">
             <p className="text-sm font-medium text-gray-700 mb-3 dark:text-gray-300">Leave a review</p>
             <ReviewForm workerId={workerId} onReviewCreated={handleReviewCreated} />
-          </>
+          </div>
         )}
       </div>
 
       {filterLoading ? (
-        <div className="py-6 text-center text-sm text-gray-400">Loading...</div>
+        <div role="status" className="py-6 text-center text-sm text-gray-400">
+          Loading reviews…
+        </div>
       ) : displayed.length > 0 ? (
         <div>
-          {displayed.map((review) => (
-            <ReviewCard key={review.id} review={review} />
-          ))}
+          <ul ref={listRef} className="list-none p-0 m-0">
+            {displayed.map((review) => (
+              // tabIndex={-1} makes each item a programmatic focus target for
+              // the "Load more" handler without adding it to the tab order.
+              <li key={review.id} tabIndex={-1} className="focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded">
+                <ReviewCard review={review} />
+              </li>
+            ))}
+          </ul>
           {hasMore && (
             <button
-              onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}
-              className="mt-4 w-full rounded-lg border py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors"
+              type="button"
+              onClick={handleLoadMore}
+              aria-label={`Load more reviews, ${sorted.length - visibleCount} remaining`}
+              className="mt-4 w-full rounded-lg border py-2 text-sm text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               Load more ({sorted.length - visibleCount} remaining)
             </button>
@@ -130,6 +192,6 @@ export default function ReviewsSection({
       ) : (
         <EmptyState variant="no-reviews" ctaHref="#review-form" />
       )}
-    </div>
+    </section>
   );
 }

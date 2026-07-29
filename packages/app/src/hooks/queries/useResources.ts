@@ -3,6 +3,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/lib/api";
+import { getMe } from "@/lib/api/auth";
 import { queryKeys } from "@/lib/queryClient";
 
 // ── Categories ────────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ export function useCategories() {
 export function useMe() {
   return useQuery({
     queryKey: queryKeys.auth.me(),
-    queryFn: () => api.getMe(),
+    queryFn: () => getMe(),
     retry: 0, // don't retry auth errors
   });
 }

@@ -8,6 +8,7 @@ import { sanitizeUser } from '../models/user.model.js'
 import { createServiceLogger } from '../utils/logger.js'
 import type { LoginBody, RegisterBody } from '../interfaces/index.js'
 import * as OTPAuth from 'otpauth'
+import { userRepository } from '../repositories/user.repository.js'
 
 const logger = createServiceLogger('AuthService')
 const ACCESS_TOKEN_TTL = '15m'
@@ -47,7 +48,7 @@ export async function loginUser(
   ipAddress?: string,
 ) {
   logger.debug('Login attempt', { email })
-  const user = await db.user.findUnique({ where: { email } })
+  const user = await userRepository.findByEmail(email)
   if (!user || !user.password || !(await argon2.verify(user.password, password))) {
     logger.warn('Login failed: invalid credentials', { email })
     throw new AppError('Invalid credentials', 401)
@@ -95,7 +96,7 @@ export async function rotateRefreshToken(rawToken: string) {
   // Revoke the old token
   await db.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } })
 
-  const user = await db.user.findUnique({ where: { id: stored.userId } })
+  const user = await userRepository.findById(stored.userId)
   if (!user) throw new AppError('User not found', 404)
 
   const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET!, {
@@ -130,20 +131,17 @@ export async function revokeAllRefreshTokens(userId: string) {
  */
 export async function registerUser({ email, password, firstName, lastName }: RegisterBody) {
   logger.debug('Registration attempt', { email })
-  const existing = await db.user.findUnique({ where: { email } })
+  const existing = await userRepository.findByEmail(email)
   if (existing) {
     logger.warn('Registration failed: email already in use', { email })
     throw new AppError('Email already in use', 409)
   }
 
   const hashed = await argon2.hash(password)
-  const user = await db.user.create({ data: { email, password: hashed, firstName, lastName } })
+  const user = await userRepository.create({ email, password: hashed, firstName, lastName })
 
   const { raw, hash, expiry } = generateVerificationToken(user.id)
-  await db.user.update({
-    where: { id: user.id },
-    data: { verificationToken: hash, verificationTokenExpiry: expiry },
-  })
+  await userRepository.update(user.id, { verificationToken: hash, verificationTokenExpiry: expiry })
 
   sendVerificationEmail(email, firstName, raw).catch((err) =>
     logger.error('Failed to send verification email', err, { email, userId: user.id }),
@@ -178,7 +176,7 @@ export async function verifyAccount(token: string): Promise<boolean> {
     throw new AppError('Invalid verification token', 400)
   }
 
-  const user = await db.user.findUnique({ where: { id: payload.id } })
+  const user = await userRepository.findById(payload.id)
   if (!user) {
     logger.warn('Email verification failed: user not found', { userId: payload.id })
     throw new AppError('User not found', 404)
@@ -199,10 +197,7 @@ export async function verifyAccount(token: string): Promise<boolean> {
     throw new AppError('Token is invalid or has expired', 400)
   }
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { verified: true, verificationToken: null, verificationTokenExpiry: null },
-  })
+  await userRepository.update(user.id, { verified: true, verificationToken: null, verificationTokenExpiry: null })
   logger.info('Email verified successfully', { userId: user.id })
   return true
 }
@@ -212,14 +207,11 @@ export async function verifyAccount(token: string): Promise<boolean> {
  * Silently returns if no account exists or if already verified (prevents enumeration).
  */
 export async function resendVerificationEmail(email: string) {
-  const user = await db.user.findUnique({ where: { email } })
+  const user = await userRepository.findByEmail(email)
   if (!user || user.verified) return
 
   const { raw, hash, expiry } = generateVerificationToken(user.id)
-  await db.user.update({
-    where: { id: user.id },
-    data: { verificationToken: hash, verificationTokenExpiry: expiry },
-  })
+  await userRepository.update(user.id, { verificationToken: hash, verificationTokenExpiry: expiry })
 
   sendVerificationEmail(email, user.firstName, raw).catch((err) =>
     logger.error({ err }, 'Failed to resend verification email'),
@@ -235,14 +227,14 @@ export async function resendVerificationEmail(email: string) {
  * @param email - The email address to send the reset link to.
  */
 export async function requestPasswordReset(email: string) {
-  const user = await db.user.findUnique({ where: { email } })
+  const user = await userRepository.findByEmail(email)
   if (!user) return
 
   const rawToken = crypto.randomBytes(32).toString('hex')
   const hash = crypto.createHash('sha256').update(rawToken).digest('hex')
   const expiry = new Date(Date.now() + 60 * 60 * 1000)
 
-  await db.user.update({ where: { id: user.id }, data: { resetToken: hash, resetTokenExpiry: expiry } })
+  await userRepository.update(user.id, { resetToken: hash, resetTokenExpiry: expiry })
 
   sendPasswordResetEmail(user.email, user.firstName, rawToken).catch((err) =>
     logger.error({ err }, 'Failed to send password reset email'),
@@ -262,9 +254,7 @@ export async function requestPasswordReset(email: string) {
  */
 export async function resetPassword(token: string, password: string) {
   const hash = crypto.createHash('sha256').update(token).digest('hex')
-  const user = await db.user.findFirst({
-    where: { resetToken: hash, resetTokenExpiry: { gt: new Date() } },
-  })
+  const user = await userRepository.findByResetToken(hash)
   if (!user) throw new AppError('Token is invalid or has expired', 400)
 
   const hashedPassword = await argon2.hash(password)
@@ -281,10 +271,7 @@ export async function resetPassword(token: string, password: string) {
     data: { revokedAt: new Date() },
   })
 
-  await db.user.update({
-    where: { id: user.id },
-    data: { password: hashedPassword, resetToken: null, resetTokenExpiry: null },
-  })
+  await userRepository.update(user.id, { password: hashedPassword, resetToken: null, resetTokenExpiry: null })
 
   logger.info('Password reset successfully - all sessions revoked', { userId: user.id })
 }
@@ -294,7 +281,7 @@ export async function resetPassword(token: string, password: string) {
  * Returns the secret and QR code data URL for display on the frontend.
  */
 export async function generateTOTPSecret(userId: string) {
-  const user = await db.user.findUnique({ where: { id: userId } })
+  const user = await userRepository.findById(userId)
   if (!user) throw new AppError('User not found', 404)
   if (user.twoFactorEnabled) throw new AppError('2FA is already enabled', 409)
 
@@ -319,7 +306,7 @@ export async function generateTOTPSecret(userId: string) {
  * Generates backup codes and stores them.
  */
 export async function enableTwoFactorAuth(userId: string, totpCode: string, secret: string) {
-  const user = await db.user.findUnique({ where: { id: userId } })
+  const user = await userRepository.findById(userId)
   if (!user) throw new AppError('User not found', 404)
 
   const totp = new OTPAuth.TOTP({
@@ -340,13 +327,10 @@ export async function enableTwoFactorAuth(userId: string, totpCode: string, secr
     crypto.randomBytes(4).toString('hex').toUpperCase(),
   )
 
-  await db.user.update({
-    where: { id: userId },
-    data: {
-      twoFactorSecret: secret,
-      twoFactorEnabled: true,
-      twoFactorBackupCodes: backupCodes,
-    },
+  await userRepository.update(userId, {
+    twoFactorSecret: secret,
+    twoFactorEnabled: true,
+    twoFactorBackupCodes: backupCodes,
   })
 
   return { backupCodes }
@@ -357,7 +341,7 @@ export async function enableTwoFactorAuth(userId: string, totpCode: string, secr
  * Accepts both regular TOTP codes and backup codes.
  */
 export async function verifyTOTPCode(userId: string, code: string) {
-  const user = await db.user.findUnique({ where: { id: userId } })
+  const user = await userRepository.findById(userId)
   if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
     throw new AppError('2FA not enabled for this user', 400)
   }
@@ -365,7 +349,7 @@ export async function verifyTOTPCode(userId: string, code: string) {
   // Check backup codes first (and remove if used)
   if (user.twoFactorBackupCodes && user.twoFactorBackupCodes.includes(code)) {
     const updated = user.twoFactorBackupCodes.filter((c) => c !== code)
-    await db.user.update({ where: { id: userId }, data: { twoFactorBackupCodes: updated } })
+    await userRepository.update(userId, { twoFactorBackupCodes: updated })
     return true
   }
 
@@ -386,12 +370,9 @@ export async function verifyTOTPCode(userId: string, code: string) {
  * Disable 2FA for a user.
  */
 export async function disableTwoFactorAuth(userId: string) {
-  await db.user.update({
-    where: { id: userId },
-    data: {
-      twoFactorEnabled: false,
-      twoFactorSecret: null,
-      twoFactorBackupCodes: [],
-    },
+  await userRepository.update(userId, {
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorBackupCodes: [],
   })
 }

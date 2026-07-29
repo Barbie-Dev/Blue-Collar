@@ -1,9 +1,9 @@
 {
   "name": "@bluecollar/types",
   "version": "1.0.0",
-  "description": "Shared TypeScript type definitions for BlueCollar packages",
-  "type": "module",
+  "description": "Shared TypeScript types and DTOs for BlueCollar API and App",
   "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -18,5 +18,7 @@
     "typescript",
     "shared"
   ],
+  "license": "MIT"
+}
   "license": "MIT"
 }

@@ -13,97 +13,26 @@
 //! - **Admin**: Set once at `initialize`. Can add/remove arbitrators.
 //! - **Arbitrators**: Approved addresses that may call `decide`.
 //! - **Disputer / Respondent**: The two parties; only they submit evidence.
+//!
+//! ## Modules
+//! - `storage` — persisted data model and typed storage accessors.
+//! - `logic`   — validation, state transitions, and token movement.
+//!
+//! This file only wires the public contract interface to `logic`; it holds
+//! no business logic of its own so the interface stays stable independent
+//! of how the implementation is organised.
 
 #![no_std]
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, Env, String, Symbol, Vec,
-};
+mod logic;
+mod storage;
+
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Symbol, Vec};
+
+pub use storage::{DataKey, Dispute, DisputeOutcome, DisputeStatus, TTL_EXTEND_TO, TTL_THRESHOLD};
 
 /// Event schema version — bump when adding/removing/renaming events.
 pub const VERSION: u32 = 1;
-
-/// Approximate TTL extension target (~1 year at 5 s/ledger).
-const TTL_EXTEND_TO: u32 = 535_000;
-/// Extend TTL only when it drops below this threshold (~6 months).
-const TTL_THRESHOLD: u32 = 267_500;
-
-// =============================================================================
-// Types
-// =============================================================================
-
-/// Dispute lifecycle phase.
-#[contracttype]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisputeStatus {
-    /// Dispute filed; tokens locked; awaiting evidence.
-    Open = 0,
-    /// At least one party has submitted evidence.
-    Evidence = 1,
-    /// Arbitrator has recorded a decision; awaiting settlement.
-    Decided = 2,
-    /// Tokens have been transferred; dispute closed.
-    Settled = 3,
-}
-
-/// Arbitrator's decision on the dispute.
-#[contracttype]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisputeOutcome {
-    /// Full refund to the disputer (payer).
-    RefundDisputer = 0,
-    /// Full release to the respondent (worker).
-    ReleaseRespondent = 1,
-    /// Split: respondent gets `split_bps` share; remainder to disputer.
-    Split = 2,
-}
-
-/// On-chain dispute record.
-#[contracttype]
-#[derive(Clone)]
-pub struct Dispute {
-    /// Unique identifier.
-    pub id: Symbol,
-    /// Party that filed the dispute and locked the tokens.
-    pub disputer: Address,
-    /// Party being disputed against.
-    pub respondent: Address,
-    /// Token contract used for the locked amount.
-    pub token: Address,
-    /// Total amount locked in this contract.
-    pub amount: i128,
-    /// Current lifecycle phase.
-    pub status: DisputeStatus,
-    /// Decision once `status >= Decided`; otherwise `RefundDisputer` as a placeholder.
-    pub outcome: DisputeOutcome,
-    /// Respondent's share in basis points (0–10 000). Only meaningful for `Split`.
-    pub split_bps: u32,
-    /// Arbitrator address once decided.
-    pub arbitrator: Option<Address>,
-    /// Unix timestamp when filed.
-    pub filed_at: u64,
-    /// Unix timestamp when settled (0 until settled).
-    pub settled_at: u64,
-    /// Off-chain evidence hash submitted by the disputer.
-    pub disputer_evidence: Option<String>,
-    /// Off-chain evidence hash submitted by the respondent.
-    pub respondent_evidence: Option<String>,
-}
-
-/// Storage keys.
-#[contracttype]
-pub enum DataKey {
-    /// Instance storage — admin address.
-    Admin,
-    /// Instance storage — paused flag.
-    Paused,
-    /// Persistent storage — approved arbitrators.
-    Arbitrators,
-    /// Persistent storage — dispute record keyed by id.
-    Dispute(Symbol),
-    /// Persistent storage — ordered list of all dispute ids.
-    DisputeList,
-}
 
 // =============================================================================
 // Contract
@@ -123,24 +52,12 @@ impl DisputeContract {
     /// # Events
     /// Emits `("Init", admin)`.
     pub fn initialize(env: Env, admin: Address) {
-        assert!(
-            !env.storage().instance().has(&DataKey::Admin),
-            "Already initialized"
-        );
-        env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Paused, &false);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Arbitrators, &Vec::<Address>::new(&env));
-        env.events().publish((symbol_short!("Init"),), admin);
+        logic::initialize(&env, &admin);
     }
 
     /// Return the admin address.
     pub fn get_admin(env: Env) -> Address {
-        env.storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized")
+        storage::get_admin(&env)
     }
 
     /// Return the event schema version.
@@ -149,51 +66,17 @@ impl DisputeContract {
     }
 
     // -------------------------------------------------------------------------
-    // Internal helpers
-    // -------------------------------------------------------------------------
-
-    fn require_admin(env: &Env, caller: &Address) {
-        caller.require_auth();
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized");
-        assert!(*caller == admin, "Not authorized");
-    }
-
-    fn require_not_paused(env: &Env) {
-        let paused: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::Paused)
-            .unwrap_or(false);
-        assert!(!paused, "Contract is paused");
-    }
-
-    fn get_arbitrators(env: &Env) -> Vec<Address> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Arbitrators)
-            .unwrap_or(Vec::new(env))
-    }
-
-    // -------------------------------------------------------------------------
     // Pause / Unpause
     // -------------------------------------------------------------------------
 
     /// Pause the contract (admin only).
     pub fn pause(env: Env, admin: Address) {
-        Self::require_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((symbol_short!("Paused"), admin), ());
+        logic::pause(&env, &admin);
     }
 
     /// Unpause the contract (admin only).
     pub fn unpause(env: Env, admin: Address) {
-        Self::require_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("Unpaused"), admin), ());
+        logic::unpause(&env, &admin);
     }
 
     // -------------------------------------------------------------------------
@@ -205,14 +88,7 @@ impl DisputeContract {
     /// # Events
     /// Emits `("ArbAdd", arbitrator)`.
     pub fn add_arbitrator(env: Env, admin: Address, arbitrator: Address) {
-        Self::require_admin(&env, &admin);
-        let mut arbs = Self::get_arbitrators(&env);
-        if arbs.iter().all(|a| a != arbitrator) {
-            arbs.push_back(arbitrator.clone());
-            env.storage().persistent().set(&DataKey::Arbitrators, &arbs);
-        }
-        env.events()
-            .publish((symbol_short!("ArbAdd"),), arbitrator);
+        logic::add_arbitrator(&env, &admin, &arbitrator);
     }
 
     /// Remove an arbitrator (admin only).
@@ -220,22 +96,12 @@ impl DisputeContract {
     /// # Events
     /// Emits `("ArbRem", arbitrator)`.
     pub fn remove_arbitrator(env: Env, admin: Address, arbitrator: Address) {
-        Self::require_admin(&env, &admin);
-        let arbs = Self::get_arbitrators(&env);
-        let mut updated: Vec<Address> = Vec::new(&env);
-        for a in arbs.iter() {
-            if a != arbitrator {
-                updated.push_back(a);
-            }
-        }
-        env.storage().persistent().set(&DataKey::Arbitrators, &updated);
-        env.events()
-            .publish((symbol_short!("ArbRem"),), arbitrator);
+        logic::remove_arbitrator(&env, &admin, &arbitrator);
     }
 
     /// Return all approved arbitrators.
     pub fn list_arbitrators(env: Env) -> Vec<Address> {
-        Self::get_arbitrators(&env)
+        storage::get_arbitrators(&env)
     }
 
     // -------------------------------------------------------------------------
@@ -269,54 +135,7 @@ impl DisputeContract {
         amount: i128,
         evidence_hash: String,
     ) {
-        disputer.require_auth();
-        Self::require_not_paused(&env);
-        assert!(amount > 0, "Amount must be positive");
-
-        let key = DataKey::Dispute(id.clone());
-        assert!(!env.storage().persistent().has(&key), "Dispute id already exists");
-
-        // Lock tokens in contract
-        let client = token::Client::new(&env, &token);
-        client.transfer(&disputer, &env.current_contract_address(), &amount);
-
-        let dispute = Dispute {
-            id: id.clone(),
-            disputer: disputer.clone(),
-            respondent: respondent.clone(),
-            token,
-            amount,
-            status: DisputeStatus::Open,
-            outcome: DisputeOutcome::RefundDisputer, // placeholder until decided
-            split_bps: 0,
-            arbitrator: None,
-            filed_at: env.ledger().timestamp(),
-            settled_at: 0,
-            disputer_evidence: Some(evidence_hash),
-            respondent_evidence: None,
-        };
-
-        env.storage().persistent().set(&key, &dispute);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        let list_key = DataKey::DisputeList;
-        let mut list: Vec<Symbol> = env
-            .storage()
-            .persistent()
-            .get(&list_key)
-            .unwrap_or(Vec::new(&env));
-        list.push_back(id.clone());
-        env.storage().persistent().set(&list_key, &list);
-        env.storage()
-            .persistent()
-            .extend_ttl(&list_key, TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        env.events().publish(
-            (symbol_short!("DspOpen"), id, disputer),
-            (respondent, amount),
-        );
+        logic::file_dispute(&env, id, disputer, respondent, token, amount, evidence_hash);
     }
 
     // -------------------------------------------------------------------------
@@ -338,48 +157,8 @@ impl DisputeContract {
     ///
     /// # Events
     /// Emits `("DspEvid", dispute_id, caller)`.
-    pub fn submit_evidence(
-        env: Env,
-        dispute_id: Symbol,
-        caller: Address,
-        evidence_hash: String,
-    ) {
-        caller.require_auth();
-        Self::require_not_paused(&env);
-
-        let key = DataKey::Dispute(dispute_id.clone());
-        let mut dispute: Dispute = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .expect("Dispute not found");
-
-        assert!(
-            dispute.disputer == caller || dispute.respondent == caller,
-            "Not a party"
-        );
-        assert!(
-            dispute.status == DisputeStatus::Open || dispute.status == DisputeStatus::Evidence,
-            "Dispute not open or in evidence phase"
-        );
-
-        if dispute.disputer == caller {
-            dispute.disputer_evidence = Some(evidence_hash);
-        } else {
-            dispute.respondent_evidence = Some(evidence_hash);
-        }
-
-        if dispute.status == DisputeStatus::Open {
-            dispute.status = DisputeStatus::Evidence;
-        }
-
-        env.storage().persistent().set(&key, &dispute);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        env.events()
-            .publish((symbol_short!("DspEvid"), dispute_id, caller), ());
+    pub fn submit_evidence(env: Env, dispute_id: Symbol, caller: Address, evidence_hash: String) {
+        logic::submit_evidence(&env, dispute_id, caller, evidence_hash);
     }
 
     // -------------------------------------------------------------------------
@@ -406,43 +185,7 @@ impl DisputeContract {
         outcome: DisputeOutcome,
         split_bps: u32,
     ) {
-        arbitrator.require_auth();
-        Self::require_not_paused(&env);
-
-        assert!(
-            Self::get_arbitrators(&env).iter().any(|a| a == arbitrator),
-            "Not an arbitrator"
-        );
-        if let DisputeOutcome::Split = outcome {
-            assert!(split_bps <= 10_000, "split_bps out of range");
-        }
-
-        let key = DataKey::Dispute(dispute_id.clone());
-        let mut dispute: Dispute = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .expect("Dispute not found");
-
-        assert!(
-            dispute.status == DisputeStatus::Open || dispute.status == DisputeStatus::Evidence,
-            "Not decidable"
-        );
-
-        dispute.status = DisputeStatus::Decided;
-        dispute.outcome = outcome;
-        dispute.split_bps = split_bps;
-        dispute.arbitrator = Some(arbitrator.clone());
-
-        env.storage().persistent().set(&key, &dispute);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-
-        env.events().publish(
-            (symbol_short!("DspDcide"), dispute_id, arbitrator),
-            (outcome as u32, split_bps),
-        );
+        logic::decide(&env, dispute_id, arbitrator, outcome, split_bps);
     }
 
     // -------------------------------------------------------------------------
@@ -456,52 +199,7 @@ impl DisputeContract {
     /// # Events
     /// Emits `("DspSettle", dispute_id)` with data `(outcome as u32, amount)`.
     pub fn settle(env: Env, dispute_id: Symbol) {
-        Self::require_not_paused(&env);
-
-        let key = DataKey::Dispute(dispute_id.clone());
-        let mut dispute: Dispute = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .expect("Dispute not found");
-
-        assert!(dispute.status == DisputeStatus::Decided, "Not decided yet");
-
-        let contract = env.current_contract_address();
-        let client = token::Client::new(&env, &dispute.token);
-
-        match dispute.outcome {
-            DisputeOutcome::RefundDisputer => {
-                client.transfer(&contract, &dispute.disputer, &dispute.amount);
-            }
-            DisputeOutcome::ReleaseRespondent => {
-                client.transfer(&contract, &dispute.respondent, &dispute.amount);
-            }
-            DisputeOutcome::Split => {
-                let respondent_share = dispute
-                    .amount
-                    .checked_mul(dispute.split_bps as i128)
-                    .and_then(|v| v.checked_div(10_000))
-                    .expect("Split overflow");
-                let disputer_share = dispute.amount - respondent_share;
-                if respondent_share > 0 {
-                    client.transfer(&contract, &dispute.respondent, &respondent_share);
-                }
-                if disputer_share > 0 {
-                    client.transfer(&contract, &dispute.disputer, &disputer_share);
-                }
-            }
-        }
-
-        dispute.status = DisputeStatus::Settled;
-        dispute.settled_at = env.ledger().timestamp();
-
-        env.storage().persistent().set(&key, &dispute);
-
-        env.events().publish(
-            (symbol_short!("DspSettle"), dispute_id),
-            (dispute.outcome as u32, dispute.amount),
-        );
+        logic::settle(&env, dispute_id);
     }
 
     // -------------------------------------------------------------------------
@@ -510,17 +208,12 @@ impl DisputeContract {
 
     /// Get a dispute by id.
     pub fn get_dispute(env: Env, dispute_id: Symbol) -> Option<Dispute> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Dispute(dispute_id))
+        storage::get_dispute(&env, &dispute_id)
     }
 
     /// List all dispute ids.
     pub fn list_disputes(env: Env) -> Vec<Symbol> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::DisputeList)
-            .unwrap_or(Vec::new(&env))
+        storage::get_dispute_list(&env)
     }
 
     // -------------------------------------------------------------------------
@@ -528,9 +221,8 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Upgrade the contract WASM. Admin only.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: soroban_sdk::BytesN<32>) {
-        Self::require_admin(&env, &admin);
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
+        logic::upgrade(&env, &admin, new_wasm_hash);
     }
 }
 
@@ -756,5 +448,168 @@ mod tests {
         // Just ensure pause/unpause cycle works:
         t.client().unpause(&t.admin);
         t.open(); // should succeed after unpause
+    }
+}
+
+// =============================================================================
+// Reentrancy regression tests (#1022)
+//
+// `file_dispute` and `settle` both take a caller-supplied `token` address and
+// call out to it. A hostile token implementation could try to re-enter the
+// dispute contract from inside its own `transfer` function while the
+// dispute's state hasn't been committed yet. These tests stand in a minimal
+// malicious "token" contract to prove that the checks-effects-interactions
+// ordering in `logic.rs` blocks that class of attack.
+// =============================================================================
+
+#[cfg(test)]
+mod reentrancy_tests {
+    extern crate std;
+    use super::*;
+    use soroban_sdk::{
+        contract, contractimpl, contracttype, testutils::Address as _, Address, Env, String,
+        Symbol,
+    };
+
+    #[contracttype]
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ReentryMode {
+        None = 0,
+        Settle = 1,
+        FileDispute = 2,
+    }
+
+    #[contracttype]
+    enum ReentryKey {
+        Target,
+        DisputeId,
+        Mode,
+    }
+
+    /// A "token" whose `transfer` tries to call back into the dispute
+    /// contract instead of moving any balance. Standing in for a hostile
+    /// token contract supplied by a disputer.
+    #[contract]
+    struct MaliciousToken;
+
+    #[contractimpl]
+    impl MaliciousToken {
+        pub fn setup(env: Env, target: Address, dispute_id: Symbol, mode: ReentryMode) {
+            env.storage().instance().set(&ReentryKey::Target, &target);
+            env.storage()
+                .instance()
+                .set(&ReentryKey::DisputeId, &dispute_id);
+            env.storage().instance().set(&ReentryKey::Mode, &mode);
+        }
+
+        pub fn transfer(env: Env, from: Address, _to: Address, _amount: i128) {
+            let mode: ReentryMode = env
+                .storage()
+                .instance()
+                .get(&ReentryKey::Mode)
+                .unwrap_or(ReentryMode::None);
+            if mode == ReentryMode::None {
+                return;
+            }
+            let target: Address = env.storage().instance().get(&ReentryKey::Target).unwrap();
+            let dispute_id: Symbol = env
+                .storage()
+                .instance()
+                .get(&ReentryKey::DisputeId)
+                .unwrap();
+            let client = DisputeContractClient::new(&env, &target);
+            match mode {
+                ReentryMode::Settle => {
+                    client.settle(&dispute_id);
+                }
+                ReentryMode::FileDispute => {
+                    let token_addr = env.current_contract_address();
+                    client.file_dispute(
+                        &dispute_id,
+                        &from,
+                        &from,
+                        &token_addr,
+                        &1,
+                        &String::from_str(&env, "reentry"),
+                    );
+                }
+                ReentryMode::None => {}
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Not decided yet")]
+    fn settle_reentrancy_is_blocked() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let disputer = Address::generate(&env);
+        let respondent = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
+
+        let contract = env.register_contract(None, DisputeContract);
+        let client = DisputeContractClient::new(&env, &contract);
+        client.initialize(&admin);
+        client.add_arbitrator(&admin, &arbitrator);
+
+        let malicious_token = env.register_contract(None, MaliciousToken);
+        let token_client = MaliciousTokenClient::new(&env, &malicious_token);
+
+        let id = Symbol::new(&env, "re1");
+        token_client.setup(&contract, &id, &ReentryMode::None);
+
+        client.file_dispute(
+            &id,
+            &disputer,
+            &respondent,
+            &malicious_token,
+            &100_000,
+            &String::from_str(&env, "abc"),
+        );
+        client.decide(&id, &arbitrator, &DisputeOutcome::RefundDisputer, &0);
+
+        // Arm the reentrant call now that the dispute is `Decided`.
+        token_client.setup(&contract, &id, &ReentryMode::Settle);
+
+        // `settle` commits `Settled` before calling the malicious token's
+        // `transfer`, so the token's attempted reentrant `settle` call must
+        // see status != Decided and panic — proving funds can't be drained
+        // twice via a hostile token.
+        client.settle(&id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Dispute id already exists")]
+    fn file_dispute_reentrancy_is_blocked() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let disputer = Address::generate(&env);
+        let respondent = Address::generate(&env);
+
+        let contract = env.register_contract(None, DisputeContract);
+        let client = DisputeContractClient::new(&env, &contract);
+        client.initialize(&admin);
+
+        let malicious_token = env.register_contract(None, MaliciousToken);
+        let token_client = MaliciousTokenClient::new(&env, &malicious_token);
+
+        let id = Symbol::new(&env, "re2");
+        token_client.setup(&contract, &id, &ReentryMode::FileDispute);
+
+        // The malicious token's `transfer` re-enters `file_dispute` with the
+        // same id. Since the dispute record is persisted *before* the token
+        // call, the duplicate-id check catches the reentrant attempt.
+        client.file_dispute(
+            &id,
+            &disputer,
+            &respondent,
+            &malicious_token,
+            &100_000,
+            &String::from_str(&env, "abc"),
+        );
     }
 }

@@ -16,25 +16,7 @@ export type {
   AuditLogEntry
 } from '@bluecollar/types'
 
-// ── Analytics types ──────────────────────────────────────────────────────────
-
-export interface WorkerAnalytics {
-  workerId: string;
-  workerName: string;
-  category: string;
-  totalViews: number;
-  uniqueViews: number;
-  viewsLast30Days: number;
-  totalTips: number;
-  tipCount: number;
-  bookmarkCount: number;
-  contactCount: number;
-  contactsLast30Days: number;
-  responseRate: number;
-  avgRating: number;
-  reviewCount: number;
-  updatedAt: string | null;
-}
+// ─── Analytics types (app-only views) ────────────────────────────────────────
 
 export interface WorkerSummary {
   id: string;
@@ -120,6 +102,43 @@ export interface ViewTrend {
   views: number;
 }
 
+export interface WorkerDashboardSeriesPoint {
+  date: string;
+  views: number;
+  uniqueViews: number;
+  tips: number;
+  tipCount: number;
+  avgRating: number | null;
+  reviewCount: number;
+  earnings: number;
+}
+
+export interface WorkerPersonalDashboard {
+  worker: { id: string; name: string; category: string; walletAddress?: string | null };
+  range: { startDate: string; endDate: string };
+  summary: {
+    totalViews: number;
+    uniqueViews: number;
+    tipsReceived: number;
+    tipCount: number;
+    avgRating: number;
+    reviewCount: number;
+    earnings: number;
+    contacts: number;
+  };
+  deltas: {
+    totalViews: number;
+    uniqueViews: number;
+    tipsReceived: number;
+    avgRating: number;
+    earnings: number;
+  };
+  charts: {
+    series: WorkerDashboardSeriesPoint[];
+    ratingDistribution: Array<{ rating: number; count: number }>;
+  };
+}
+
 export interface TopWorker {
   rank: number;
   workerId: string;
@@ -129,45 +148,6 @@ export interface TopWorker {
   totalTips: number;
   bookmarkCount: number;
   avgRating: number;
-}
-
-// ─── Jobs ─────────────────────────────────────────────────────────────────────
-
-export type JobStatus = "open" | "closed" | "expired" | "filled";
-export type JobUrgency = "low" | "normal" | "urgent";
-export type ApplicationStatus = "pending" | "accepted" | "rejected" | "withdrawn";
-
-export interface Job {
-  id: string;
-  title: string;
-  description: string;
-  budget?: number | null;
-  skills: string[];
-  urgency: JobUrgency;
-  escrowAmount?: number | null;
-  escrowTxId?: string | null;
-  status: JobStatus;
-  expiresAt?: string | null;
-  renewedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  category: Category;
-  location?: { id: string; city: string; state?: string | null; country: string } | null;
-  postedBy: { id: string; firstName: string; lastName: string; avatar?: string | null };
-  _count?: { applications: number; messages: number };
-}
-
-export interface JobApplication {
-  id: string;
-  jobId: string;
-  workerId: string;
-  coverLetter?: string | null;
-  proposedRate?: number | null;
-  status: ApplicationStatus;
-  createdAt: string;
-  updatedAt: string;
-  job?: { id: string; title: string; postedById: string };
-  worker?: { id: string; name: string; avatar?: string | null; email?: string | null; category?: Category };
 }
 
 export interface JobMessage {
@@ -180,50 +160,19 @@ export interface JobMessage {
   recipient: { id: string; firstName: string; lastName: string; avatar?: string | null };
 }
 
-// ── Notifications ───────────────────────────────────────────────────────────
+// ─── Invoices ─────────────────────────────────────────────────────────────────
 
-export type NotificationType = "tip" | "review" | "contact" | "system" | "message";
+export type InvoiceStatus = "draft" | "issued" | "paid" | "overdue" | "void";
 
-export interface AppNotification {
+export interface InvoiceLineItem {
   id: string;
-  userId: string;
-  type: NotificationType;
-  title: string;
-  message?: string | null;
-  href?: string | null;
-  read: boolean;
-  createdAt: string;
+  description: string;
+  quantity: number;
+  /** Price per unit, in the invoice's currency. */
+  unitAmount: number;
 }
 
-// ── Conversations ───────────────────────────────────────────────────────────
-
-export interface Conversation {
+export interface InvoiceParty {
   id: string;
-  subject?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  participants: ConversationParticipant[];
-  messages?: Message[];
-  unreadCount?: number;
-}
-
-export interface ConversationParticipant {
-  id: string;
-  conversationId: string;
-  userId: string;
-  lastReadAt?: string | null;
-  joinedAt: string;
-  user: { id: string; firstName: string; lastName: string; avatar?: string | null };
-}
-
-export interface Message {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  body: string;
-  attachmentUrl?: string | null;
-  attachmentType?: string | null;
-  readAt?: string | null;
-  createdAt: string;
-  sender: { id: string; firstName: string; lastName: string; avatar?: string | null };
+  name: string;
 }

@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { db } from '../db.js'
 import { AppError } from './AppError.js'
 import { formatWorker } from '../models/worker.model.js'
@@ -6,6 +7,8 @@ import { publishEvent } from './webhook.service.js'
 import { appEvents } from '../events/app-events.js'
 import { createServiceLogger } from '../utils/logger.js'
 import { workerRepository } from '../repositories/worker.repository.js'
+import { WorkerCollection } from '../resources/index.js'
+import { processImage, deleteImages } from '../utils/imageProcessor.js'
 
 const logger = createServiceLogger('WorkerService')
 const workerInclude = { category: true, curator: true } as const
@@ -67,7 +70,7 @@ export async function listWorkers(opts: {
     ? { categoryId: category }
     : {}
 
-  const where: any = {
+  const where: Prisma.WorkerWhereInput = {
     isActive: true,
     deletedAt: null,
     ...categoryFilter,
@@ -88,7 +91,7 @@ export async function listWorkers(opts: {
   }
 
   if (minRating !== undefined || maxRating !== undefined) {
-    const havingClause: any = {}
+    const havingClause: { gte?: number; lte?: number } = {}
     if (minRating !== undefined) havingClause.gte = minRating
     if (maxRating !== undefined) havingClause.lte = maxRating
     const qualifiedIds = await db.review.groupBy({
@@ -100,7 +103,7 @@ export async function listWorkers(opts: {
   }
 
   // Build orderBy
-  let orderBy: any = { createdAt: 'desc' }
+  let orderBy: Prisma.WorkerOrderByWithRelationInput = { createdAt: 'desc' }
   if (sortBy === 'oldest') orderBy = { createdAt: 'asc' }
   else if (sortBy === 'name') orderBy = { name: sortOrder }
   else if (sortBy === 'newest') orderBy = { createdAt: sortOrder }
@@ -115,6 +118,127 @@ export async function listWorkers(opts: {
     data: data.map(formatWorker),
     meta: { total, page, limit, pages: Math.ceil(total / limit) },
   }
+}
+
+// ── Cursor-paginated listing (no offset/geo params) ─────────────────────────────
+
+// Haversine distance in km between two lat/lng points
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+export async function listWorkersCursor(opts: {
+  category?: string
+  categories?: string[]
+  isVerified?: boolean
+  city?: string
+  state?: string
+  country?: string
+  available?: number
+  listedSince?: number
+  minRating?: number
+  maxRating?: number
+  search?: string
+  cursor?: string
+  limit: number
+}) {
+  const {
+    category, categories, isVerified, city, state, country,
+    available, listedSince, minRating, maxRating, search, cursor, limit,
+  } = opts
+
+  const categoryFilter = categories && categories.length > 0
+    ? { categoryId: { in: categories } }
+    : category
+    ? { categoryId: category }
+    : {}
+
+  const where: Prisma.WorkerWhereInput = {
+    isActive: true,
+    ...categoryFilter,
+    ...(isVerified !== undefined ? { isVerified } : {}),
+    ...(city || state || country
+      ? {
+          location: {
+            ...(city ? { city: { contains: city, mode: 'insensitive' as const } } : {}),
+            ...(state ? { state: { contains: state, mode: 'insensitive' as const } } : {}),
+            ...(country ? { country: { contains: country, mode: 'insensitive' as const } } : {}),
+          },
+        }
+      : {}),
+    ...(available !== undefined ? { availability: { some: { dayOfWeek: available } } } : {}),
+    ...(listedSince !== undefined
+      ? { createdAt: { gte: new Date(Date.now() - listedSince * 365 * 24 * 60 * 60 * 1000) } }
+      : {}),
+    ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
+  }
+
+  if (minRating !== undefined || maxRating !== undefined) {
+    const havingClause: { gte?: number; lte?: number } = {}
+    if (minRating !== undefined) havingClause.gte = minRating
+    if (maxRating !== undefined) havingClause.lte = maxRating
+    const qualifiedIds = await db.review.groupBy({
+      by: ['workerId'],
+      _avg: { rating: true },
+      having: { rating: { _avg: havingClause } },
+    })
+    where.id = { in: qualifiedIds.map((r: { workerId: string }) => r.workerId) }
+  }
+
+  const rows = await db.worker.findMany({
+    where,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    take: limit + 1,
+    include: { category: true, curator: true },
+    orderBy: { createdAt: 'desc' },
+  })
+  const data = rows.slice(0, limit)
+
+  return {
+    data: WorkerCollection(data as any),
+    nextCursor: rows.length > limit ? data[data.length - 1]?.id ?? null : null,
+  }
+}
+
+// ── Geo-radius listing (lat/lng/radius params) ───────────────────────────────────
+
+export async function listWorkersGeo(opts: {
+  lat: number
+  lng: number
+  radiusKm: number
+  category?: string
+  page: number
+  limit: number
+}) {
+  const { lat, lng, radiusKm, category, page, limit } = opts
+
+  // Bounding box pre-filter (1 degree ≈ 111 km)
+  const delta = radiusKm / 111
+  const workers = await db.worker.findMany({
+    where: {
+      isActive: true,
+      location: {
+        lat: { gte: lat - delta, lte: lat + delta },
+        lng: { gte: lng - delta, lte: lng + delta },
+      },
+      ...(category ? { categoryId: category } : {}),
+    },
+    include: { category: true, location: true },
+  })
+
+  const withDistance = workers
+    .filter(w => w.location?.lat != null && w.location?.lng != null)
+    .map(w => ({ ...w, distanceKm: haversine(lat, lng, w.location!.lat!, w.location!.lng!) }))
+    .filter(w => w.distanceKm <= radiusKm)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+
+  return withDistance.slice((page - 1) * limit, page * limit)
 }
 
 // ── Full-text search ──────────────────────────────────────────────────────────
@@ -267,16 +391,23 @@ export async function getWorker(id: string) {
 
 export async function createWorker(data: CreateWorkerBody, curatorId: string) {
   logger.debug('Creating worker', { curatorId, name: data.name })
-  const worker = await db.worker.create({ data: { ...data, curatorId } as any, include: workerInclude })
+  const worker = await db.worker.create({
+    data: { ...data, curatorId, createdById: curatorId, updatedById: curatorId } as any,
+    include: workerInclude,
+  })
   publishEvent('worker.created', { worker: formatWorker(worker) }).catch(() => {})
   appEvents.emit('worker.created', { workerId: worker.id, curatorId })
   logger.info('Worker created successfully', { workerId: worker.id, curatorId })
   return formatWorker(worker)
 }
 
-export async function updateWorker(id: string, data: UpdateWorkerBody) {
+export async function updateWorker(id: string, data: UpdateWorkerBody, updatedById?: string) {
   logger.debug('Updating worker', { workerId: id })
-  const worker = await db.worker.update({ where: { id }, data: data as any, include: workerInclude })
+  const worker = await db.worker.update({
+    where: { id },
+    data: { ...data as any, ...(updatedById ? { updatedById } : {}) },
+    include: workerInclude,
+  })
   publishEvent('worker.updated', { worker: formatWorker(worker) }).catch(() => {})
   appEvents.emit('worker.updated', { workerId: id, curatorId: worker.curatorId })
   logger.info('Worker updated successfully', { workerId: id })
@@ -316,6 +447,85 @@ export async function toggleWorker(id: string) {
   })
   appEvents.emit('worker.toggled', { workerId: id, isActive: updated.isActive })
   return formatWorker(updated)
+}
+
+/**
+ * Get a single worker with its portfolio, ordered by `order`.
+ * Used by the (currently unrouted) `showWorker` controller — kept distinct
+ * from `getWorker` because it includes `portfolio` instead of `curator` and
+ * returns `null` rather than throwing on a miss.
+ */
+export async function getWorkerWithPortfolio(id: string) {
+  return db.worker.findUnique({
+    where: { id },
+    include: { category: true, portfolio: { orderBy: { order: 'asc' } } },
+  })
+}
+
+export async function listMyWorkers(curatorId: string, page: number, limit: number) {
+  const where = { curatorId }
+  const [data, total] = await Promise.all([
+    db.worker.findMany({
+      where, skip: (page - 1) * limit, take: limit, include: { category: true }, orderBy: { createdAt: 'desc' },
+    }),
+    db.worker.count({ where }),
+  ])
+  return { data, meta: { total, page, limit, pages: Math.ceil(total / limit) } }
+}
+
+/** Build the image-variant fields (thumb/medium/full/avatar) from an uploaded file, if any. */
+async function processedImageFields(file?: { path: string }): Promise<Record<string, string>> {
+  if (!file) return {}
+  const imgs = await processImage(file.path)
+  return { imageThumb: imgs.thumb, imageMedium: imgs.medium, imageFull: imgs.full, avatar: imgs.full }
+}
+
+export async function createWorkerWithMedia(
+  data: CreateWorkerBody,
+  curatorId: string,
+  file?: { path: string },
+) {
+  const imageFields = await processedImageFields(file)
+  return createWorker({ ...data, ...imageFields }, curatorId)
+}
+
+/**
+ * Update a worker, handling the multipart/method-override image upload path
+ * (see README: POST + X-HTTP-Method: PUT). Deletes the old image variants
+ * before writing new ones when a replacement file is uploaded.
+ */
+export async function updateWorkerWithMedia(
+  id: string,
+  data: UpdateWorkerBody,
+  file: { path: string } | undefined,
+  updatedById?: string,
+) {
+  if (file) {
+    const existing = await db.worker.findUnique({ where: { id }, select: { imageFull: true } })
+    if (existing?.imageFull) deleteImages(existing.imageFull)
+  }
+  const imageFields = await processedImageFields(file)
+  return updateWorker(id, { ...data, ...imageFields }, updatedById)
+}
+
+export async function deleteWorkerWithMedia(id: string) {
+  const existing = await db.worker.findUnique({ where: { id }, select: { imageFull: true } })
+  if (existing?.imageFull) deleteImages(existing.imageFull)
+  await deleteWorker(id)
+}
+
+/** Fire-and-forget search analytics tracking; silently no-ops if the table is unavailable. */
+export async function trackSearchAnalytics(
+  query: string,
+  resultsCount: number,
+  hasFilters: boolean,
+  ipAddress: string,
+) {
+  await db.searchAnalytics?.create?.({
+    data: { query, resultsCount, hasFilters, ipAddress },
+  }).catch(() => {
+    // Silently fail if analytics table doesn't exist
+  })
 }
 
 /**

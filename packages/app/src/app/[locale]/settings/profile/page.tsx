@@ -53,6 +53,11 @@ export default function ProfileSettingsPage() {
     });
   }, [user]);
 
+  const getAuthHeaders = () => ({
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+
   const validateProfile = () => {
     const errors: Partial<UserProfile> = {};
 
@@ -66,11 +71,6 @@ export default function ProfileSettingsPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const authHeaders = {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-
   const handleProfileSave = async () => {
     if (!validateProfile()) return;
 
@@ -78,7 +78,7 @@ export default function ProfileSettingsPage() {
     try {
       const res = await fetch(`${API}/users/me`, {
         method: "PUT",
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         body: JSON.stringify(profile),
       });
       const json = await res.json().catch(() => ({}));
@@ -108,7 +108,7 @@ export default function ProfileSettingsPage() {
     try {
       const res = await fetch(`${API}/users/me/password`, {
         method: "POST",
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       const json = await res.json().catch(() => ({}));
@@ -136,7 +136,7 @@ export default function ProfileSettingsPage() {
     try {
       const res = await fetch(`${API}/users/me`, {
         method: "DELETE",
-        headers: authHeaders,
+        headers: getAuthHeaders(),
       });
       if (!res.ok) throw new Error("Failed to delete account.");
       logout();

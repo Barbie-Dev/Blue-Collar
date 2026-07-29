@@ -2,6 +2,8 @@
 
 #![no_std]
 
-pub mod lib {
-    // Placeholder for shared types
-}
+pub mod errors;
+pub mod versioning;
+
+pub use errors::ContractError;
+pub use versioning::{ContractVersion, EventSchema, StorageSchema};

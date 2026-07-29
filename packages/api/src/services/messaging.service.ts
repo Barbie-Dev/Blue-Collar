@@ -1,5 +1,5 @@
 import { db } from '../db.js'
-import { AppError } from '../services/AppError.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 
 export async function createConversation(participantIds: string[], subject?: string) {
   const conversation = await db.conversation.create({
@@ -25,7 +25,7 @@ export async function getConversation(conversationId: string, userId: string) {
       messages: { take: 50, orderBy: { createdAt: 'asc' } },
     },
   })
-  if (!conversation) throw new AppError('Conversation not found', 404)
+  if (!conversation) throw new AppError('Conversation not found', 404, true, ErrorCode.NOT_FOUND)
   return conversation
 }
 
@@ -57,7 +57,7 @@ export async function searchMessages(conversationId: string, query: string, user
       participants: { some: { userId } },
     },
   })
-  if (!conversation) throw new AppError('Conversation not found', 404)
+  if (!conversation) throw new AppError('Conversation not found', 404, true, ErrorCode.NOT_FOUND)
 
   return db.message.findMany({
     where: {
@@ -71,8 +71,8 @@ export async function searchMessages(conversationId: string, query: string, user
 
 export async function deleteMessage(messageId: string, userId: string) {
   const message = await db.message.findUnique({ where: { id: messageId } })
-  if (!message) throw new AppError('Message not found', 404)
-  if (message.senderId !== userId) throw new AppError('Unauthorized', 403)
+  if (!message) throw new AppError('Message not found', 404, true, ErrorCode.NOT_FOUND)
+  if (message.senderId !== userId) throw new AppError('Unauthorized', 403, true, ErrorCode.FORBIDDEN)
 
   // Soft delete by setting body
   return db.message.update({

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import LoadingState from "@/components/LoadingState";
+import ErrorState from "@/components/ErrorState";
 
 const DEFAULT_LIMIT = 10;
 const MARKET_CONTRACT_ID = process.env.NEXT_PUBLIC_MARKET_CONTRACT_ID ?? "";
@@ -155,15 +157,10 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
         </div>
       </div>
 
-      {error && (
-        <div className="m-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
-      )}
+      {error && <ErrorState variant="inline" message={error} className="m-6" />}
 
       {loading && !error ? (
-        <div className="flex items-center justify-center gap-2 p-10 text-sm text-gray-500">
-          <Loader2 size={18} className="animate-spin" />
-          Loading transactions...
-        </div>
+        <LoadingState variant="inline" message="Loading transactions..." className="justify-center p-10" />
       ) : null}
 
       {!loading && !error && items.length === 0 ? (

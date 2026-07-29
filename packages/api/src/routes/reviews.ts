@@ -7,6 +7,7 @@ import {
   getModerationQueue,
   moderateReview,
 } from '../controllers/reviews.js'
+import { createReview as createReviewForWorker } from '../services/review.service.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { catchAsync } from '../utils/catchAsync.js'
 
@@ -35,6 +36,18 @@ export async function listWorkerReviews(req: Request, res: Response) {
     code: 200,
   })
 }
+
+export const createWorkerReview = catchAsync(async (req: Request, res: Response) => {
+  const workerId = req.params.id ?? req.params.workerId
+  const { rating, comment, transactionHash } = req.body
+  const review = await createReviewForWorker(workerId, req.user!.id, rating, comment, transactionHash)
+  return res.status(201).json({
+    data: review,
+    status: 'success',
+    message: 'Review created (pending moderation)',
+    code: 201,
+  })
+})
 
 export async function deleteReview(req: Request, res: Response) {
   const review = await db.review.findUnique({ where: { id: req.params.id } })
