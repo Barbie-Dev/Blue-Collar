@@ -18,7 +18,30 @@
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
     "@typescript-eslint/no-explicit-any": "error",
     "@typescript-eslint/explicit-function-return-type": "off",
-    "no-console": "off"
+    "no-console": "off",
+
+    // ── #1073: Prefer undefined over null for optional values ─────────────────
+    //
+    // Convention: use `undefined` (not `null`) for optional/absent values in
+    // TypeScript service/utility code.
+    //
+    // EXCEPTIONS (suppress with // eslint-disable-next-line no-restricted-syntax):
+    //   - Prisma ORM returns null for nullable DB columns — keep as-is.
+    //   - JSON payloads that must serialize null (e.g. JSON:API contracts).
+    //   - Third-party library return types you do not control.
+    //
+    // See docs/NULL_UNDEFINED_CONVENTIONS.md for the full rationale.
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "AssignmentExpression[right.type='Literal'][right.raw='null']",
+        "message": "Prefer `undefined` over `null` for optional values in service/util code. Use null only for Prisma DB fields or explicit API contracts. See docs/NULL_UNDEFINED_CONVENTIONS.md."
+      },
+      {
+        "selector": "VariableDeclarator[init.type='Literal'][init.raw='null']",
+        "message": "Prefer `undefined` over `null` for optional values in service/util code. Use null only for Prisma DB fields or explicit API contracts. See docs/NULL_UNDEFINED_CONVENTIONS.md."
+      }
+    ]
   },
   "ignorePatterns": ["dist/", "node_modules/"]
 }
