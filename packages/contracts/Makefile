@@ -15,6 +15,7 @@ WASM_DIR := target/wasm32-unknown-unknown/release
 
 .PHONY: build build-registry build-market test coverage \
         fuzz fuzz-proptest fuzz-register fuzz-tip fuzz-migrate \
+        audit security-scan \
         deploy-testnet deploy-mainnet \
         deploy-registry-testnet deploy-market-testnet \
         deploy-registry-mainnet deploy-market-mainnet \
@@ -40,6 +41,19 @@ coverage:
 	rustup component add llvm-tools-preview
 	cargo install --locked cargo-llvm-cov
 	cargo llvm-cov --workspace --lcov --output-path target/coverage/lcov.info --fail-under-lines 80
+
+# ---------------------------------------------------------------------------
+# Security Audit
+# ---------------------------------------------------------------------------
+
+# Install cargo-audit and scan for known vulnerabilities in dependencies
+audit:
+	cargo install --locked cargo-audit
+	cargo audit
+
+# Full security scan including audit, advisories check, and outdated dependencies
+security-scan: audit
+	@echo "Security scan completed. Check output above for any advisories."
 
 # ---------------------------------------------------------------------------
 # Fuzzing

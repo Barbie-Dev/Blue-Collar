@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@bluecollar/types": "workspace:*",
     "@stellar/stellar-sdk": "^13.0.0"
   },
   "devDependencies": {

@@ -13,5 +13,12 @@
   "devDependencies": {
     "typescript": "^5.4.0"
   },
+  "keywords": [
+    "types",
+    "typescript",
+    "shared"
+  ],
+  "license": "MIT"
+}
   "license": "MIT"
 }
