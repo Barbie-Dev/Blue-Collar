@@ -21,6 +21,8 @@
     "openapi:generate": "tsx src/scripts/generate-openapi.ts",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
+    "audit": "pnpm audit --audit-level=high",
+    "audit:fix": "pnpm audit --fix",
     "test:mutation": "stryker run",
     "test:mutation:ci": "stryker run --reporters json,clear-text"
   },
@@ -35,6 +37,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@bluecollar/types": "workspace:*",
     "@asteasolutions/zod-to-openapi": "7.3.4",
     "@opentelemetry/api": "^1.7.0",
     "@opentelemetry/auto-instrumentations-node": "^0.40.0",

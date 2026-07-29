@@ -4,3 +4,4 @@ packages:
   - "packages/contracts"
   - "packages/mobile"
   - "packages/sdk"
+  - "packages/types"

@@ -1,0 +1,22 @@
+{
+  "name": "@bluecollar/types",
+  "version": "1.0.0",
+  "description": "Shared TypeScript type definitions for BlueCollar packages",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "types",
+    "typescript",
+    "shared"
+  ],
+  "license": "MIT"
+}
