@@ -19,6 +19,22 @@ releases (distinct from the WASM upgrade mechanics below).
 
 ---
 
+## Minimum Supported Versions
+
+| Tool | Minimum version | Notes |
+|---|---|---|
+| Rust (stable) | **1.74.0** | Soroban SDK 26.x requires this edition and feature set |
+| soroban-sdk | **26.1.0** | All contracts pin to this version for ABI consistency |
+| Stellar CLI | **21.x** | Used for `stellar contract deploy / invoke / install` |
+| wasm32-unknown-unknown | (bundled with Rust) | Added via `rustup target add wasm32-unknown-unknown` |
+
+> All member crates in the workspace declare `soroban-sdk = "26.1.0"` (except the
+> `fuzz` crate which also accepts `"26.1.0"`). Do **not** mix SDK versions across
+> contracts — the Soroban host environment enforces ABI compatibility and mismatched
+> versions cause silent runtime panics.
+
+---
+
 ## Prerequisites
 
 ```bash
