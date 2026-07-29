@@ -15,3 +15,4 @@
 
 export * from './factories/index.js'
 export * from './express/index.js'
+export * from './stellar-mocks.js'

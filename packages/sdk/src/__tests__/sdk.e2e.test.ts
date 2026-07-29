@@ -128,8 +128,9 @@ describe('HorizonClient.getAccountInfo', () => {
   it('throws SdkError with statusCode 404 for unfunded accounts', async () => {
     mockFetchFail(404)
 
-    await expect(client.getAccountInfo(PUBLIC_KEY)).rejects.toThrow(SdkError)
-    await expect(client.getAccountInfo(PUBLIC_KEY)).rejects.toMatchObject({
+    const err = await client.getAccountInfo(PUBLIC_KEY).catch((e) => e)
+    expect(err).toBeInstanceOf(SdkError)
+    expect(err).toMatchObject({
       statusCode: 404,
     })
   })
@@ -310,6 +311,15 @@ describe('HorizonClient.fundTestnetAccount', () => {
     )
     await expect(client.fundTestnetAccount(PUBLIC_KEY)).rejects.toThrow(/account already funded/)
   })
+
+  it('throws SdkError with status text when error field is absent', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({}), { status: 503, statusText: 'Service Unavailable' }),
+    )
+    const err = await client.fundTestnetAccount(PUBLIC_KEY).catch((e) => e)
+    expect(err).toBeInstanceOf(SdkError)
+    expect(err.message).toMatch(/Service Unavailable/)
+  })
 })
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -371,8 +381,9 @@ describe('RegistryClient.simulateInvoke', () => {
       error: { message: 'contract not found', code: -32600 },
     })
 
-    await expect(registry.simulateInvoke('get_worker', [])).rejects.toThrow(SdkError)
-    await expect(registry.simulateInvoke('get_worker', [])).rejects.toMatchObject({
+    const err = await registry.simulateInvoke('get_worker', []).catch((e) => e)
+    expect(err).toBeInstanceOf(SdkError)
+    expect(err).toMatchObject({
       statusCode: 400,
     })
   })
