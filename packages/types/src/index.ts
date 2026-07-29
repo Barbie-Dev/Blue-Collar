@@ -261,3 +261,6 @@ export interface AuditLogEntry {
   createdAt: string;
   user?: { id: string; firstName: string; lastName: string; email: string } | null;
 }
+
+// ─── Shared Validation Schemas ────────────────────────────────────────────────
+export * from './validations.js'
