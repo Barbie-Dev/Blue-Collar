@@ -189,6 +189,7 @@ model Review {
   flagReason  String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  helpfulVotes ReviewHelpful[]
 
   @@unique([userId, workerId])
 }
@@ -744,6 +745,8 @@ model ReviewHelpful {
 model Conversation {
   id           String                     @id @default(cuid())
   subject      String?
+  initiatorId  String?
+  initiatedBy  User?                      @relation("ConversationInitiator", fields: [initiatorId], references: [id])
   createdAt    DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
   participants ConversationParticipant[]
