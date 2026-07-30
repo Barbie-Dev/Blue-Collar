@@ -1,0 +1,114 @@
+name: E2E & Accessibility
+
+# Full Playwright E2E suite + axe-core a11y gate (#814).
+# Blocks PRs on critical/serious a11y violations.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/app/**"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths:
+      - "packages/app/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+env:
+  CI: "true"
+
+jobs:
+  # Blocking: axe-core a11y gate
+  a11y:
+    name: Accessibility (axe-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers (chromium only)
+        run: pnpm --filter @bluecollar/app exec playwright install --with-deps chromium
+
+      - name: Seed local env
+        working-directory: packages/app
+        run: cp .env.example .env.local 2>/dev/null || true
+
+      - name: Start dev server
+        working-directory: packages/app
+        run: pnpm exec next dev -p 3001 &
+
+      - name: Wait for server
+        run: npx --yes wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run a11y tests
+        working-directory: packages/app
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3001
+        run: pnpm exec playwright test e2e/a11y/ --project=chromium --reporter=list
+
+      - name: Upload a11y reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a11y-report-${{ github.run_number }}
+          path: |
+            packages/app/a11y-reports
+            packages/app/playwright-report
+          if-no-files-found: ignore
+
+  # Non-blocking: full E2E suite
+  e2e:
+    name: E2E (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @bluecollar/app exec playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Seed local env
+        working-directory: packages/app
+        run: cp .env.example .env.local 2>/dev/null || true
+
+      - name: Start dev server
+        working-directory: packages/app
+        run: pnpm exec next dev -p 3001 &
+
+      - name: Wait for server
+        run: npx --yes wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run E2E tests
+        working-directory: packages/app
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3001
+        run: pnpm exec playwright test --project=${{ matrix.browser }} --reporter=list
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ matrix.browser }}-${{ github.run_number }}
+          path: |
+            packages/app/playwright-report
+            packages/app/test-results
+          if-no-files-found: ignore

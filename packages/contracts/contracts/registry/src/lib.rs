@@ -213,6 +213,34 @@ pub struct Badge {
     pub active: bool,
 }
 
+/// Verification level for a worker (#778).
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerificationLevel {
+    /// No verification — default state.
+    None = 0,
+    /// Identity checked by a curator.
+    Basic = 1,
+    /// Credentials and category skills verified.
+    Verified = 2,
+    /// Expert-level — multiple verified credentials and peer reviews.
+    Expert = 3,
+}
+
+/// A certified skill entry for a worker (#778).
+#[contracttype]
+#[derive(Clone)]
+pub struct CertifiedSkill {
+    /// Skill identifier (e.g., "pipe_fitting", "arc_welding").
+    pub skill: Symbol,
+    /// Curator or admin who certified this skill.
+    pub certified_by: Address,
+    /// Unix timestamp when certification was granted.
+    pub certified_at: u64,
+    /// Unix timestamp when certification expires (0 = no expiry).
+    pub expires_at: u64,
+}
+
 /// A single immutable reputation history entry (#677).
 #[contracttype]
 #[derive(Clone)]
@@ -329,6 +357,10 @@ pub enum DataKey {
     ReputationHistory(Symbol),
     /// Persistent storage — [`ReputationInputs`] keyed by worker id (#677).
     ReputationInputs(Symbol),
+    /// Persistent storage — [`VerificationLevel`] keyed by worker id (#778).
+    VerificationLevel(Symbol),
+    /// Persistent storage — `Vec<CertifiedSkill>` keyed by worker id (#778).
+    CertifiedSkills(Symbol),
 }
 
 // =============================================================================
@@ -2623,6 +2655,180 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     /// Get the pending upgrade, if any.
     pub fn get_pending_upgrade(env: Env) -> Option<PendingUpgrade> {
         env.storage().persistent().get(&DataKey::PendingUpgrade)
+    }
+
+    // -------------------------------------------------------------------------
+    // Verification levels & certified skills (#778)
+    // -------------------------------------------------------------------------
+
+    /// Set the verification level for a worker. Admin or curator-manager only.
+    ///
+    /// # Parameters
+    /// - `caller`: Must hold `ROLE_CURATOR_MGR` or `ROLE_ADMIN`; `require_auth()` enforced.
+    /// - `worker_id`: The worker's unique identifier.
+    /// - `level`: The new [`VerificationLevel`] to assign.
+    ///
+    /// # Panics
+    /// - `"Missing role"` if caller lacks the required role.
+    /// - `"Worker not found"` if no worker exists with the given `worker_id`.
+    ///
+    /// # Events
+    /// Emits `("VrfLvlSet", worker_id)` with data `(caller, level as u32)`.
+    pub fn set_verification_level(
+        env: Env,
+        caller: Address,
+        worker_id: Symbol,
+        level: VerificationLevel,
+    ) {
+        let curator_mgr = Self::role_symbol(&env, ROLE_CURATOR_MGR_CACHED);
+        Self::require_role(&env, &curator_mgr, &caller);
+        Self::require_not_paused(&env);
+        assert!(
+            env.storage().persistent().has(&DataKey::Worker(worker_id.clone())),
+            "Worker not found"
+        );
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::VerificationLevel(worker_id.clone()), &level);
+
+        env.events().publish(
+            (symbol_short!("VrfLvlSet"), worker_id),
+            (caller, level as u32),
+        );
+    }
+
+    /// Get the verification level for a worker.
+    ///
+    /// Returns [`VerificationLevel::None`] if no level has been set.
+    pub fn get_verification_level(env: Env, worker_id: Symbol) -> VerificationLevel {
+        env.storage()
+            .persistent()
+            .get(&DataKey::VerificationLevel(worker_id))
+            .unwrap_or(VerificationLevel::None)
+    }
+
+    /// Add or update a certified skill for a worker. Admin or curator-manager only.
+    ///
+    /// Replaces an existing entry for the same `skill` symbol. Appends if new.
+    ///
+    /// # Parameters
+    /// - `caller`: Must hold `ROLE_CURATOR_MGR` or `ROLE_ADMIN`.
+    /// - `worker_id`: The worker's unique identifier.
+    /// - `skill`: Skill symbol (e.g., `Symbol::new(&env, "arc_welding")`).
+    /// - `expires_at`: Unix timestamp when the cert expires (0 = no expiry).
+    ///
+    /// # Panics
+    /// - `"Missing role"` if caller lacks the required role.
+    /// - `"Worker not found"` if no worker exists with the given `worker_id`.
+    ///
+    /// # Events
+    /// Emits `("SkillCert", worker_id, skill)` with data `(caller, expires_at)`.
+    pub fn add_certified_skill(
+        env: Env,
+        caller: Address,
+        worker_id: Symbol,
+        skill: Symbol,
+        expires_at: u64,
+    ) {
+        let curator_mgr = Self::role_symbol(&env, ROLE_CURATOR_MGR_CACHED);
+        Self::require_role(&env, &curator_mgr, &caller);
+        Self::require_not_paused(&env);
+        assert!(
+            env.storage().persistent().has(&DataKey::Worker(worker_id.clone())),
+            "Worker not found"
+        );
+
+        let now = env.ledger().timestamp();
+        let entry = CertifiedSkill {
+            skill: skill.clone(),
+            certified_by: caller.clone(),
+            certified_at: now,
+            expires_at,
+        };
+
+        let mut skills: Vec<CertifiedSkill> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CertifiedSkills(worker_id.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        // Replace existing entry for the same skill, or append.
+        let mut found = false;
+        let mut updated: Vec<CertifiedSkill> = Vec::new(&env);
+        for s in skills.iter() {
+            if s.skill == skill {
+                updated.push_back(entry.clone());
+                found = true;
+            } else {
+                updated.push_back(s);
+            }
+        }
+        if !found {
+            updated.push_back(entry);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::CertifiedSkills(worker_id.clone()), &updated);
+
+        env.events().publish(
+            (symbol_short!("SkillCert"), worker_id, skill),
+            (caller, expires_at),
+        );
+    }
+
+    /// Revoke a certified skill from a worker. Admin or curator-manager only.
+    ///
+    /// # Panics
+    /// - `"Missing role"` if caller lacks the required role.
+    /// - `"Skill not found"` if the skill is not in the worker's certified list.
+    ///
+    /// # Events
+    /// Emits `("SkillRvkd", worker_id, skill)` with data `caller`.
+    pub fn revoke_certified_skill(
+        env: Env,
+        caller: Address,
+        worker_id: Symbol,
+        skill: Symbol,
+    ) {
+        let curator_mgr = Self::role_symbol(&env, ROLE_CURATOR_MGR_CACHED);
+        Self::require_role(&env, &curator_mgr, &caller);
+        Self::require_not_paused(&env);
+
+        let skills: Vec<CertifiedSkill> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CertifiedSkills(worker_id.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let mut updated: Vec<CertifiedSkill> = Vec::new(&env);
+        let mut removed = false;
+        for s in skills.iter() {
+            if s.skill == skill {
+                removed = true;
+            } else {
+                updated.push_back(s);
+            }
+        }
+        assert!(removed, "Skill not found");
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::CertifiedSkills(worker_id.clone()), &updated);
+
+        env.events().publish(
+            (symbol_short!("SkillRvkd"), worker_id, skill),
+            caller,
+        );
+    }
+
+    /// Get all certified skills for a worker.
+    pub fn get_certified_skills(env: Env, worker_id: Symbol) -> Vec<CertifiedSkill> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CertifiedSkills(worker_id))
+            .unwrap_or(Vec::new(&env))
     }
 }
 

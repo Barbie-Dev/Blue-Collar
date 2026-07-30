@@ -1,0 +1,85 @@
+name: Load Tests
+
+# Nightly load tests against staging (#813).
+# Runs at 02:00 UTC every day. Can also be triggered manually.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "k6 scenario (smoke | load | stress | soak)"
+        required: false
+        default: "load"
+      base_url:
+        description: "API base URL (default: staging)"
+        required: false
+
+jobs:
+  load-test:
+    name: k6 – ${{ inputs.scenario || 'load' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
+            --keyserver hkp://keyserver.ubuntu.com:80 \
+            --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install -y k6
+
+      - name: Search & discovery endpoints
+        env:
+          BASE_URL: ${{ inputs.base_url || secrets.STAGING_API_URL || 'http://localhost:3000/api' }}
+          SCENARIO: ${{ inputs.scenario || 'load' }}
+        run: |
+          mkdir -p load-results
+          k6 run \
+            --env BASE_URL="$BASE_URL" \
+            --env SCENARIO="$SCENARIO" \
+            --out json=load-results/search.json \
+            packages/api/load/search.js
+
+      - name: Auth endpoints
+        env:
+          BASE_URL: ${{ inputs.base_url || secrets.STAGING_API_URL || 'http://localhost:3000/api' }}
+        run: |
+          k6 run \
+            --env BASE_URL="$BASE_URL" \
+            --out json=load-results/auth.json \
+            packages/api/load/auth.js
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ github.run_number }}
+          path: load-results/
+          retention-days: 30
+
+      - name: Summarise results
+        if: always()
+        run: |
+          echo "## Load Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          for f in load-results/*.json; do
+            name=$(basename "$f" .json)
+            echo "### $name" >> "$GITHUB_STEP_SUMMARY"
+            # Extract key metrics from k6 JSON output
+            if command -v jq &>/dev/null; then
+              jq -r '
+                select(.type == "Point" and .metric == "http_req_duration")
+                | [.data.tags.endpoint // "overall", .data.value]
+                | @tsv
+              ' "$f" | awk '
+                { sum[$1]+=$2; count[$1]++ }
+                END { for(k in sum) printf "| %s | %.0f ms avg |\n", k, sum[k]/count[k] }
+              ' >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            fi
+          done

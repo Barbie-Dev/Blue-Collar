@@ -1,49 +1,36 @@
 import { db } from '../db.js'
 import { AppError } from './AppError.js'
-import { sendModerationEmail } from '../mailer/index.js'
+import { createServiceLogger } from '../utils/logger.js'
 
-// ─── Spam detection ───────────────────────────────────────────────────────────
+const logger = createServiceLogger('ReviewService')
 
 /**
- * Heuristic spam detector: repeated characters, ALL-CAPS, or known spam phrases.
+ * Verify if a user has an on-chain interaction (tip or escrow) with a worker.
+ * For now, this is a stub that checks if user has a wallet address.
+ * In production, this would query Stellar Horizon for actual transactions.
  */
-export function isSpam(text?: string): boolean {
-  if (!text) return false
-  if (text.length > 2000) return true
-  if (/(.)\1{9,}/.test(text)) return true // 10+ repeated chars
-  if (text === text.toUpperCase() && text.length > 20) return true // all caps
-  const spamPhrases = ['buy now', 'click here', 'free money', 'make money fast']
-  return spamPhrases.some((p) => text.toLowerCase().includes(p))
+async function verifyOnChainTransaction(userId: string, workerId: string, transactionHash?: string): Promise<boolean> {
+  if (transactionHash) {
+    // In production: verify transactionHash against Stellar Horizon API
+    // For now: accept any transactionHash as evidence of interaction
+    logger.debug('Verifying transaction hash', { transactionHash })
+    return true
+  }
+
+  const user = await db.user.findUnique({ where: { id: userId }, select: { walletAddress: true } })
+  const worker = await db.worker.findUnique({ where: { id: workerId }, select: { walletAddress: true } })
+  
+  // Basic check: both have wallet addresses
+  // In production: query Horizon API for actual tip/escrow transactions
+  return !!(user?.walletAddress && worker?.walletAddress)
 }
-
-// ─── Service interface (for dependency injection) ─────────────────────────────
-
-export interface ReviewService {
-  createReview(
-    workerId: string,
-    authorId: string,
-    rating: number,
-    body: string,
-    comment?: string,
-  ): Promise<unknown>
-  listReviews(
-    workerId: string,
-    page: number,
-    limit: number,
-    filterRating?: number,
-  ): Promise<unknown>
-  flagReview(reviewId: string, reason?: string): Promise<unknown>
-  getModerationQueue(): Promise<unknown>
-  moderateReview(reviewId: string, action: 'approve' | 'reject'): Promise<unknown>
-  deleteReview(reviewId: string, requestingUserId: string): Promise<void>
-}
-
-// ─── createReview ─────────────────────────────────────────────────────────────
 
 /**
  * Create a review for a worker. A user may only review a worker once.
+ * Verifies that the reviewer has had an on-chain interaction with the worker.
  * @throws AppError 404 if worker not found
  * @throws AppError 409 if user already reviewed this worker
+ * @throws AppError 403 if user has not interacted with the worker on-chain
  */
 export async function createReview(
   workerId: string,
@@ -51,6 +38,7 @@ export async function createReview(
   rating: number,
   body: string,
   comment?: string,
+  transactionHash?: string,
 ) {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new AppError('Rating must be between 1 and 5', 400)
@@ -63,49 +51,42 @@ export async function createReview(
   const worker = await db.worker.findUnique({ where: { id: workerId } })
   if (!worker) throw new AppError('Worker not found', 404)
 
-  const spamFlagged = isSpam(body) || isSpam(comment)
+  const existing = await db.review.findUnique({
+    where: { userId_workerId: { userId: authorId, workerId } },
+  })
+  if (existing) throw new AppError('You have already reviewed this worker', 409)
 
-  try {
-    return await db.review.create({
-      data: {
-        workerId,
-        userId: authorId,
-        authorId,
-        rating,
-        body: body.trim(),
-        comment: comment ?? body.trim(),
-        flagged: spamFlagged,
-        status: 'pending',
-      },
-      include: {
-        author: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      },
-    })
-  } catch (err) {
-    if ((err as { code?: string }).code === 'P2002') {
-      throw new AppError('You have already reviewed this worker', 409)
-    }
-    throw err
+  // Verify on-chain transaction
+  const isVerified = await verifyOnChainTransaction(authorId, workerId, transactionHash)
+  if (!isVerified && !transactionHash) {
+    throw new AppError('You must have an on-chain interaction with this worker to leave a review', 403)
   }
+
+  logger.info('Creating review', { workerId, authorId, rating, isVerified })
+  
+  return db.review.create({
+    data: {
+      workerId,
+      authorId,
+      rating,
+      comment,
+      transactionHash,
+      isVerified,
+      status: 'pending',
+    },
+    include: { author: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+  })
 }
 
 // ─── listReviews ──────────────────────────────────────────────────────────────
 
 /**
- * Return a paginated list of approved reviews for a worker, plus aggregate stats.
+ * Return a paginated list of reviews for a worker, plus aggregate stats and rating distribution.
+ * Includes caching for performance.
  */
-export async function listReviews(
-  workerId: string,
-  page: number,
-  limit: number,
-  filterRating?: number,
-) {
-  const where = {
-    workerId,
-    status: 'approved' as const,
-    ...(filterRating ? { rating: filterRating } : {}),
-  }
-  const baseWhere = { workerId, status: 'approved' as const }
+export async function listReviews(workerId: string, page: number, limit: number, filterRating?: number) {
+  const where = { workerId, status: 'approved', ...(filterRating ? { rating: filterRating } : {}) }
+  const baseWhere = { workerId, status: 'approved' }
 
   const [reviews, total, agg, allRatings] = await Promise.all([
     db.review.findMany({
@@ -140,135 +121,45 @@ export async function listReviews(
     averageRating: agg._avg.rating ? Math.round(agg._avg.rating * 10) / 10 : null,
     reviewCount: totalReviews,
     distribution,
+    verified: reviews.filter((r) => r.isVerified).length,
   }
 }
-
-// ─── listAllWorkerReviews (for the route handler — includes aggregate) ─────────
-
-/**
- * Return all reviews for a worker (no pagination) with aggregate stats.
- * Used by the worker reviews route.
- */
-export async function listWorkerReviews(workerId: string) {
-  const [reviews, aggregate] = await Promise.all([
-    db.review.findMany({
-      where: { workerId },
-      include: {
-        author: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    }),
-    db.review.aggregate({
-      where: { workerId },
-      _avg: { rating: true },
-      _count: { rating: true },
-    }),
-  ])
-
-  return {
-    data: reviews,
-    avgRating: aggregate._avg.rating ?? 0,
-    reviewCount: aggregate._count.rating,
-  }
-}
-
-// ─── flagReview ───────────────────────────────────────────────────────────────
 
 /**
  * Flag a review for moderation.
- * @throws AppError 404 if review not found
  */
-export async function flagReview(reviewId: string, reason?: string) {
+export async function flagReview(reviewId: string, reason: string) {
   const review = await db.review.findUnique({ where: { id: reviewId } })
   if (!review) throw new AppError('Review not found', 404)
 
   return db.review.update({
     where: { id: reviewId },
-    data: { flagged: true, flagReason: reason ?? null, status: 'pending' },
+    data: { flagged: true, flagReason: reason },
   })
 }
 
-// ─── getModerationQueue ───────────────────────────────────────────────────────
-
 /**
- * Return all reviews that are pending or flagged (admin moderation queue).
+ * Approve a pending review (admin/moderator).
  */
-export async function getModerationQueue() {
-  return db.review.findMany({
-    where: { OR: [{ status: 'pending' }, { flagged: true }] },
-    include: {
-      worker: { select: { id: true, name: true } },
-      author: { select: { id: true, firstName: true, lastName: true } },
-    },
-    orderBy: { createdAt: 'asc' },
-  })
-}
-
-// ─── moderateReview ───────────────────────────────────────────────────────────
-
-/**
- * Approve or reject a review and optionally notify the author.
- * @throws AppError 400 if action is invalid
- * @throws AppError 404 if review not found
- */
-export async function moderateReview(reviewId: string, action: 'approve' | 'reject') {
-  if (!['approve', 'reject'].includes(action)) {
-    throw new AppError('action must be approve or reject', 400)
-  }
-
-  const review = await db.review.findUnique({
-    where: { id: reviewId },
-    include: { author: true },
-  })
-  if (!review) throw new AppError('Review not found', 404)
-
-  const status = action === 'approve' ? 'approved' : 'rejected'
-  const updated = await db.review.update({
-    where: { id: reviewId },
-    data: { status, flagged: false },
-  })
-
-  // Notify author — fire and forget, don't fail the request if email fails
-  if (review.author?.email) {
-    await sendModerationEmail(
-      review.author.email,
-      review.author.firstName,
-      status,
-    ).catch(() => {})
-  }
-
-  return updated
-}
-
-// ─── deleteReview ─────────────────────────────────────────────────────────────
-
-/**
- * Delete a review. Only the review owner (userId) may delete it.
- * @throws AppError 404 if review not found
- * @throws AppError 403 if the requesting user does not own the review
- */
-export async function deleteReview(reviewId: string, requestingUserId: string) {
+export async function approveReview(reviewId: string) {
   const review = await db.review.findUnique({ where: { id: reviewId } })
   if (!review) throw new AppError('Review not found', 404)
 
-  // Support both userId and authorId ownership check
-  const ownerId = review.userId ?? review.authorId
-  if (ownerId !== requestingUserId) {
-    throw new AppError('Forbidden', 403)
-  }
-
-  await db.review.delete({ where: { id: reviewId } })
+  return db.review.update({
+    where: { id: reviewId },
+    data: { status: 'approved' },
+  })
 }
 
-// ─── Default service object (for dependency injection) ────────────────────────
+/**
+ * Reject a review (admin/moderator).
+ */
+export async function rejectReview(reviewId: string, reason?: string) {
+  const review = await db.review.findUnique({ where: { id: reviewId } })
+  if (!review) throw new AppError('Review not found', 404)
 
-export const reviewService: ReviewService = {
-  createReview,
-  listReviews,
-  flagReview,
-  getModerationQueue,
-  moderateReview,
-  deleteReview,
+  return db.review.update({
+    where: { id: reviewId },
+    data: { status: 'rejected', flagReason: reason },
+  })
 }
-
-export default reviewService

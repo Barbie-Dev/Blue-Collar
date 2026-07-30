@@ -1,48 +1,101 @@
 import type { Request, Response } from 'express'
-import { handleError } from '../utils/handleError.js'
-import {
-  flagReview as flagReviewService,
-  getModerationQueue as getModerationQueueService,
-  moderateReview as moderateReviewService,
-} from '../services/review.service.js'
+import { db } from '../db.js'
+import { sendModerationEmail } from '../mailer/index.js'
+import * as reviewService from '../services/review.service.js'
+import { AppError } from '../services/AppError.js'
+import { catchAsync } from '../utils/catchAsync.js'
 
-/**
- * PATCH /api/workers/:workerId/reviews/:id/flag
- * Flag a review for admin moderation.
- */
-export async function flagReview(req: Request, res: Response) {
-  try {
-    const updated = await flagReviewService(req.params.id, req.body.reason)
-    return res.json({ data: updated, status: 'success', code: 200 })
-  } catch (err) {
-    return handleError(res, err)
-  }
-}
+export const listReviews = catchAsync(async (req: Request, res: Response) => {
+  const { workerId } = req.params
+  const page = Math.max(1, parseInt(req.query.page as string) || 1)
+  const limit = Math.min(100, parseInt(req.query.limit as string) || 20)
+  const filterRating = req.query.rating ? parseInt(req.query.rating as string) : undefined
 
-/**
- * GET /api/workers/:workerId/reviews/moderation/queue
- * Admin: return all pending or flagged reviews.
- */
-export async function getModerationQueue(req: Request, res: Response) {
-  try {
-    const reviews = await getModerationQueueService()
-    return res.json({ data: reviews, status: 'success', code: 200 })
-  } catch (err) {
-    return handleError(res, err)
-  }
-}
+  const result = await reviewService.listReviews(workerId, page, limit, filterRating)
+  res.json({ data: result.data, meta: result.meta, stats: { averageRating: result.averageRating, reviewCount: result.reviewCount, verified: result.verified, distribution: result.distribution }, status: 'success', code: 200 })
+})
 
-/**
- * PATCH /api/workers/:workerId/reviews/:id/moderate
- * Admin: approve or reject a review.
- * Body: { action: 'approve' | 'reject' }
- */
-export async function moderateReview(req: Request, res: Response) {
-  try {
-    const { action } = req.body
-    const updated = await moderateReviewService(req.params.id, action)
-    return res.json({ data: updated, status: 'success', code: 200 })
-  } catch (err) {
-    return handleError(res, err)
+export const createReview = catchAsync(async (req: Request, res: Response) => {
+  const { workerId } = req.params
+  const { rating, comment, transactionHash } = req.body
+
+  const review = await reviewService.createReview(workerId, req.user!.id, rating, comment, transactionHash)
+  res.status(201).json({ data: review, status: 'success', message: 'Review created (pending moderation)', code: 201 })
+})
+
+export const flagReview = catchAsync(async (req: Request, res: Response) => {
+  const { reason } = req.body
+  if (!reason) throw new AppError('reason is required', 400)
+
+  const review = await reviewService.flagReview(req.params.id, reason)
+  res.json({ data: review, status: 'success', message: 'Review flagged', code: 200 })
+})
+
+export const getModerationQueue = catchAsync(async (req: Request, res: Response) => {
+  const reviews = await db.review.findMany({
+    where: { OR: [{ status: 'pending' }, { flagged: true }] },
+    include: {
+      worker: { select: { id: true, name: true } },
+      author: { select: { id: true, firstName: true, lastName: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+  res.json({ data: reviews, status: 'success', code: 200 })
+})
+
+export const moderateReview = catchAsync(async (req: Request, res: Response) => {
+  const { action } = req.body // 'approve' | 'reject'
+  if (!['approve', 'reject'].includes(action))
+    throw new AppError('action must be approve or reject', 400)
+
+  const review = await db.review.findUnique({
+    where: { id: req.params.id },
+    include: { author: true },
+  })
+  if (!review) throw new AppError('Review not found', 404)
+
+  const updated = action === 'approve'
+    ? await reviewService.approveReview(req.params.id)
+    : await reviewService.rejectReview(req.params.id)
+
+  // Notify author
+  if (review.author.email) {
+    await sendModerationEmail(review.author.email, review.author.firstName, updated.status).catch(() => {})
   }
-}
+
+  res.json({ data: updated, status: 'success', message: `Review ${action}ed`, code: 200 })
+})
+
+export const getReviewReports = catchAsync(async (req: Request, res: Response) => {
+  const page = Math.max(1, parseInt(req.query.page as string) || 1)
+  const limit = Math.min(100, parseInt(req.query.limit as string) || 20)
+
+  const [reports, total] = await Promise.all([
+    db.review.findMany({
+      where: { flagged: true },
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        worker: { select: { id: true, name: true } },
+        author: { select: { id: true, firstName: true, lastName: true } },
+      },
+    }),
+    db.review.count({ where: { flagged: true } }),
+  ])
+
+  res.json({
+    data: reports,
+    meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    status: 'success',
+    code: 200,
+  })
+})
+
+export const reportReview = catchAsync(async (req: Request, res: Response) => {
+  const { reason } = req.body
+  if (!reason) throw new AppError('reason is required', 400)
+
+  const review = await reviewService.flagReview(req.params.reviewId, reason)
+  res.json({ data: review, status: 'success', message: 'Review reported', code: 200 })
+})

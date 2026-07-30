@@ -13,6 +13,9 @@ use soroban_sdk::{
 /// Maximum allowed fee: 10000 bps = 100%.
 pub const MAX_FEE_BPS: u32 = 10000;
 
+/// Event schema version — bump when adding/removing/renaming events.
+pub const VERSION: u32 = 1;
+
 // =============================================================================
 // Roles
 // =============================================================================
@@ -200,13 +203,15 @@ impl FeeDistributionContract {
     }
 
     /// Collect fees from a token.
-    pub fn collect_fees(env: Env, token: Address, amount: i128) {
+    pub fn collect_fees(env: Env, from: Address, token: Address, amount: i128) {
+        from.require_auth();
         Self::require_not_paused(&env);
         assert!(amount > 0, "Amount must be positive");
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
             &env.current_contract_address(),
+            &from,
             &env.current_contract_address(),
             &amount,
         );
@@ -236,7 +241,7 @@ impl FeeDistributionContract {
         Self::require_role(&env, &fee_mgr_role, &caller);
         Self::require_not_paused(&env);
 
-        let recipients = Self::get_fee_recipients(&env);
+        let recipients = Self::get_fee_recipients(env.clone());
         assert!(!recipients.is_empty(), "No fee recipients configured");
 
         let mut collection: FeeCollection = env
@@ -303,6 +308,11 @@ impl FeeDistributionContract {
             .publish((symbol_short!("FeeWdraw"), token, amount), ());
     }
 
+    /// Return the event schema version.
+    pub fn version(_env: Env) -> u32 {
+        VERSION
+    }
+
     /// Upgrade contract WASM.
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         let upgrader_role = Symbol::new(&env, ROLE_UPGRADER);
@@ -315,18 +325,22 @@ impl FeeDistributionContract {
 }
 
 #[cfg(test)]
+mod test;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_initialize() {
         let env = Env::default();
-        let admin = Address::random(&env);
-        FeeDistributionContract::initialize(env.clone(), admin.clone());
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract = env.register_contract(None, FeeDistributionContract);
+        let client = FeeDistributionContractClient::new(&env, &contract);
+        client.initialize(&admin);
         assert!(env
-            .storage()
-            .instance()
-            .has(&DataKey::Admin));
+            .as_contract(&contract, || { env.storage().instance().has(&DataKey::Admin) }));
     }
 }

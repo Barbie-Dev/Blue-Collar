@@ -1,0 +1,86 @@
+name: Visual Regression
+
+# Gates PRs on visual diffs (#815).
+# Update baselines by pushing a commit with [update-snapshots] in the message,
+# or run the workflow manually with update_snapshots=true.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/app/**"
+      - ".github/workflows/visual.yml"
+  pull_request:
+    paths:
+      - "packages/app/**"
+      - ".github/workflows/visual.yml"
+  workflow_dispatch:
+    inputs:
+      update_snapshots:
+        description: "Regenerate baseline snapshots"
+        type: boolean
+        default: false
+
+env:
+  CI: "true"
+
+jobs:
+  visual:
+    name: Visual snapshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers (chromium)
+        run: pnpm --filter @bluecollar/app exec playwright install --with-deps chromium
+
+      - name: Seed local env
+        working-directory: packages/app
+        run: cp .env.example .env.local 2>/dev/null || true
+
+      - name: Start dev server
+        working-directory: packages/app
+        run: pnpm exec next dev -p 3001 &
+
+      - name: Wait for server
+        run: npx --yes wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run visual tests (update mode)
+        if: ${{ inputs.update_snapshots == true || contains(github.event.head_commit.message, '[update-snapshots]') }}
+        working-directory: packages/app
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3001
+        run: pnpm exec playwright test visual/ --project=chromium --update-snapshots
+
+      - name: Run visual tests (comparison mode)
+        if: ${{ inputs.update_snapshots != true && !contains(github.event.head_commit.message, '[update-snapshots]') }}
+        working-directory: packages/app
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3001
+        run: pnpm exec playwright test visual/ --project=chromium --reporter=list
+
+      - name: Commit updated snapshots
+        if: ${{ inputs.update_snapshots == true || contains(github.event.head_commit.message, '[update-snapshots]') }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/app/visual/
+          git diff --cached --quiet || git commit -m "chore: update visual regression baselines [skip ci]"
+          git push
+
+      - name: Upload visual diff artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diffs-${{ github.run_number }}
+          path: |
+            packages/app/playwright-report
+            packages/app/test-results
+          if-no-files-found: ignore

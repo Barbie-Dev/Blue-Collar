@@ -1,0 +1,18 @@
+[package]
+name = "bluecollar-integration"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "End-to-end integration tests for BlueCollar Soroban contracts against the in-process testnet"
+
+[lib]
+name = "bluecollar_integration"
+# No cdylib – this crate is test-only.
+
+[dependencies]
+soroban-sdk = { version = "26.1.0", features = ["testutils"] }
+bluecollar-registry = { path = "../registry" }
+bluecollar-market   = { path = "../market" }
+
+[dev-dependencies]
+soroban-sdk = { version = "26.1.0", features = ["testutils"] }

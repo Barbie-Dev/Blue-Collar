@@ -2,58 +2,59 @@ import { Router, type Request, type Response } from 'express'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { handleError } from '../utils/handleError.js'
 import {
+  listReviews,
   createReview,
-  deleteReview,
   flagReview,
   getModerationQueue,
   moderateReview,
-  listWorkerReviews,
-} from '../services/review.service.js'
+} from '../controllers/reviews.js'
+import { createReview as createReviewForWorker } from '../services/review.service.js'
+import { authenticate, authorize } from '../middleware/auth.js'
+import { catchAsync } from '../utils/catchAsync.js'
 
 const router = Router({ mergeParams: true })
 
-/**
- * GET /api/workers/:workerId/reviews
- * List all reviews for a worker with aggregate stats.
- */
-router.get('/', async (req: Request, res: Response) => {
-  try {
-    const workerId = req.params.workerId ?? req.params.id
-    const result = await listWorkerReviews(workerId)
-    return res.json({ ...result, status: 'success', code: 200 })
-  } catch (err) {
-    return handleError(res, err)
-  }
+export async function listWorkerReviews(req: Request, res: Response) {
+  const workerId = req.params.workerId ?? req.params.id
+  const [reviews, aggregate] = await Promise.all([
+    db.review.findMany({
+      where: { workerId },
+      include: { author: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+      orderBy: { createdAt: 'desc' },
+    }),
+    db.review.aggregate({
+      where: { workerId },
+      _avg: { rating: true },
+      _count: { rating: true },
+    }),
+  ])
+
+  return res.json({
+    data: reviews,
+    avgRating: aggregate._avg.rating ?? 0,
+    reviewCount: aggregate._count.rating,
+    status: 'success',
+    code: 200,
+  })
+}
+
+export const createWorkerReview = catchAsync(async (req: Request, res: Response) => {
+  const workerId = req.params.id ?? req.params.workerId
+  const { rating, comment, transactionHash } = req.body
+  const review = await createReviewForWorker(workerId, req.user!.id, rating, comment, transactionHash)
+  return res.status(201).json({
+    data: review,
+    status: 'success',
+    message: 'Review created (pending moderation)',
+    code: 201,
+  })
 })
 
-/**
- * POST /api/workers/:workerId/reviews
- * Create a review for a worker. Requires authentication.
- */
-router.post('/', authenticate, async (req: Request, res: Response) => {
-  try {
-    const workerId = req.params.workerId ?? req.params.id
-    const rating = Number(req.body.rating)
-    const body = String(req.body.body ?? req.body.comment ?? '').trim()
-    const comment = req.body.comment ? String(req.body.comment).trim() : undefined
-
-    const review = await createReview(workerId, req.user!.id, rating, body, comment)
-    return res.status(201).json({ data: review, status: 'success', code: 201 })
-  } catch (err) {
-    return handleError(res, err)
-  }
-})
-
-/**
- * DELETE /api/workers/:workerId/reviews/:id
- * Delete a review. Only the review owner may delete.
- */
-router.delete('/:id', authenticate, async (req: Request, res: Response) => {
-  try {
-    await deleteReview(req.params.id, req.user!.id)
-    return res.status(204).send()
-  } catch (err) {
-    return handleError(res, err)
+export async function deleteReview(req: Request, res: Response) {
+  const review = await db.review.findUnique({ where: { id: req.params.id } })
+  if (!review) return res.status(404).json({ status: 'error', message: 'Not found', code: 404 })
+  if (review.authorId !== req.user!.id) {
+    return res.status(403).json({ status: 'error', message: 'Forbidden', code: 403 })
   }
 })
 
@@ -70,41 +71,13 @@ router.patch('/:id/flag', authenticate, async (req: Request, res: Response) => {
   }
 })
 
-/**
- * GET /api/workers/:workerId/reviews/moderation/queue
- * Admin: get pending/flagged reviews.
- */
-router.get(
-  '/moderation/queue',
-  authenticate,
-  authorize('admin'),
-  async (_req: Request, res: Response) => {
-    try {
-      const reviews = await getModerationQueue()
-      return res.json({ data: reviews, status: 'success', code: 200 })
-    } catch (err) {
-      return handleError(res, err)
-    }
-  },
-)
+router.get('/', listReviews)
+router.post('/', authenticate, createReview)
+router.delete('/:id', authenticate, deleteReview)
+router.patch('/:id/flag', authenticate, catchAsync(flagReview))
 
-/**
- * PATCH /api/workers/:workerId/reviews/:id/moderate
- * Admin: approve or reject a review.
- */
-router.patch(
-  '/:id/moderate',
-  authenticate,
-  authorize('admin'),
-  async (req: Request, res: Response) => {
-    try {
-      const { action } = req.body
-      const updated = await moderateReview(req.params.id, action)
-      return res.json({ data: updated, status: 'success', code: 200 })
-    } catch (err) {
-      return handleError(res, err)
-    }
-  },
-)
+// Admin moderation
+router.get('/moderation/queue', authenticate, authorize('admin'), catchAsync(getModerationQueue))
+router.patch('/:id/moderate', authenticate, authorize('admin'), catchAsync(moderateReview))
 
 export default router

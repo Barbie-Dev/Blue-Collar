@@ -3,18 +3,8 @@
 import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import * as Dialog from "@radix-ui/react-dialog";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
 import {
   Plus,
   Pencil,
@@ -39,6 +29,12 @@ import { cn } from "@/lib/utils";
 import FriendbotBanner from "@/components/FriendbotBanner";
 import { DashboardTableSkeleton } from "@/components/Skeleton";
 import type { CuratorAnalytics, ViewTrend } from "@/types";
+
+// ── Dynamic imports (code splitting: recharts is ~200KB) ─────────────────────
+const CuratorCharts = dynamic(
+  () => import("@/components/charts/CuratorCharts"),
+  { ssr: false, loading: () => <div className="h-[250px] rounded-lg bg-gray-50 animate-pulse" /> }
+);
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
 const HORIZON_TESTNET = "https://horizon-testnet.stellar.org";
@@ -406,27 +402,11 @@ export default function DashboardPage() {
                   <X size={16} />
                 </button>
               </div>
-              {trendsLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="animate-spin text-gray-400" size={24} />
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={selectedWorkerTrends}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={(d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      fontSize={12}
-                    />
-                    <YAxis fontSize={12} />
-                    <Tooltip
-                      labelFormatter={(d) => new Date(d).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                    />
-                    <Line type="monotone" dataKey="views" stroke="#2563eb" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
+              <CuratorCharts.ViewTrendsChart
+                trends={selectedWorkerTrends}
+                trendsLoading={trendsLoading}
+                workerName={selectedWorkerName}
+              />
             </div>
           )}
         </>
@@ -546,15 +526,7 @@ export default function DashboardPage() {
               {analytics.workers.length > 0 && (
                 <div className="rounded-xl border bg-white p-6 shadow-sm">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Views by Worker</h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={analytics.workers}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" fontSize={12} />
-                      <YAxis fontSize={12} />
-                      <Tooltip />
-                      <Bar dataKey="views" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <CuratorCharts.WorkersBarChart workers={analytics.workers} />
                 </div>
               )}
             </>

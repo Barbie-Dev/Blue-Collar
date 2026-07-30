@@ -27,7 +27,28 @@ import type {
  */
 export async function login(req: Request<{}, {}, LoginBody>, res: Response) {
   try {
-    const { data, token, refreshToken } = await authService.loginUser(req.body);
+    const userAgent = req.get('user-agent')
+    const ipAddress = (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim()
+    
+    // Parse device name from user agent (basic heuristic)
+    let deviceName = 'Unknown Device'
+    if (userAgent) {
+      if (userAgent.includes('Chrome')) deviceName = 'Chrome'
+      else if (userAgent.includes('Firefox')) deviceName = 'Firefox'
+      else if (userAgent.includes('Safari')) deviceName = 'Safari'
+      else if (userAgent.includes('Mobile')) deviceName = 'Mobile'
+      
+      if (userAgent.includes('Windows')) deviceName += ' on Windows'
+      else if (userAgent.includes('Macintosh')) deviceName += ' on Mac'
+      else if (userAgent.includes('Linux')) deviceName += ' on Linux'
+    }
+
+    const { data, token, refreshToken, deviceId } = await authService.loginUser(
+      req.body,
+      deviceName,
+      userAgent,
+      ipAddress,
+    )
     return res.status(202).json({
       data: UserResource(data as any),
       status: "success",
@@ -35,9 +56,10 @@ export async function login(req: Request<{}, {}, LoginBody>, res: Response) {
       code: 202,
       token,
       refreshToken,
-    });
+      deviceId,
+    })
   } catch (err) {
-    return handleError(res, err);
+    return handleError(res, err)
   }
 }
 
@@ -260,5 +282,113 @@ export async function unsubscribeReminders(req: Request, res: Response) {
     return res.json({ status: 'success', message: 'You have been unsubscribed from reminder emails', code: 200 })
   } catch {
     return res.status(400).json({ status: 'error', message: 'Invalid or expired token', code: 400 })
+  }
+}
+
+/**
+ * GET /api/auth/devices
+ * List all active devices/sessions for the authenticated user.
+ */
+export async function listDevices(req: Request, res: Response) {
+  try {
+    const { id: userId } = req.user!
+    const devices = await db.device.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { lastUsedAt: 'desc' },
+    })
+    return res.json({ data: devices, status: 'success', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+}
+
+/**
+ * DELETE /api/auth/devices/:deviceId
+ * Revoke a specific device session.
+ */
+export async function revokeDevice(req: Request<{ deviceId: string }>, res: Response) {
+  try {
+    const { id: userId } = req.user!
+    const { deviceId } = req.params
+
+    const device = await db.device.findUnique({ where: { id: deviceId } })
+    if (!device || device.userId !== userId) {
+      return res.status(404).json({ status: 'error', message: 'Device not found', code: 404 })
+    }
+
+    await db.device.update({ where: { id: deviceId }, data: { revokedAt: new Date() } })
+    return res.json({ status: 'success', message: 'Device revoked', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+}
+
+/**
+ * DELETE /api/auth/devices
+ * Revoke all other devices (remote logout all but current device).
+ */
+export async function revokeAllOtherDevices(req: Request, res: Response) {
+  try {
+    const { id: userId } = req.user!
+    const { currentDeviceId } = req.body
+
+    await db.device.updateMany({
+      where: { userId, id: { not: currentDeviceId }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    })
+
+    return res.json({ status: 'success', message: 'All other devices revoked', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+}
+
+/**
+ * POST /api/auth/2fa/enroll
+ * Generate a TOTP secret for 2FA enrollment.
+ */
+export async function enrollTwoFactor(req: Request, res: Response) {
+  try {
+    const { id: userId } = req.user!
+    const { secret, qrCode } = await authService.generateTOTPSecret(userId)
+    return res.json({ data: { secret, qrCode }, status: 'success', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+}
+
+/**
+ * POST /api/auth/2fa/verify
+ * Verify TOTP code and enable 2FA.
+ * Body: { code, secret }
+ */
+export async function verifyTwoFactor(
+  req: Request<{}, {}, { code: string; secret: string }>,
+  res: Response,
+) {
+  try {
+    const { id: userId } = req.user!
+    const { code, secret } = req.body
+    if (!code || !secret) {
+      return res.status(400).json({ status: 'error', message: 'Code and secret are required', code: 400 })
+    }
+    const { backupCodes } = await authService.enableTwoFactorAuth(userId, code, secret)
+    return res.json({ data: { backupCodes }, status: 'success', message: '2FA enabled successfully', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+}
+
+/**
+ * DELETE /api/auth/2fa
+ * Disable 2FA for the authenticated user.
+ */
+export async function disableTwoFactor(req: Request, res: Response) {
+  try {
+    const { id: userId } = req.user!
+    await authService.disableTwoFactorAuth(userId)
+    return res.json({ status: 'success', message: '2FA disabled', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
   }
 }

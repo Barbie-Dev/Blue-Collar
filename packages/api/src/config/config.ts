@@ -95,6 +95,17 @@ export const config = {
     vapidPublicKey:  optional('VAPID_PUBLIC_KEY', ''),
     vapidPrivateKey: optional('VAPID_PRIVATE_KEY', ''),
   },
+
+  stellar: {
+    /** Horizon RPC base URL */
+    horizonUrl: optional('HORIZON_URL', 'https://horizon-testnet.stellar.org'),
+    /** Stellar network passphrase: testnet or mainnet */
+    network: optional('STELLAR_NETWORK', 'testnet') as 'testnet' | 'mainnet',
+    /** Deployed Registry Soroban contract ID (optional at startup) */
+    registryContractId: optional('REGISTRY_CONTRACT_ID', ''),
+    /** Deployed Market Soroban contract ID (optional at startup) */
+    marketContractId: optional('MARKET_CONTRACT_ID', ''),
+  },
 } as const
 
 export type Config = typeof config

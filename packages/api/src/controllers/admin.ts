@@ -16,10 +16,28 @@ export async function listWorkers(req: Request, res: Response) {
 }
 
 export async function listUsers(req: Request, res: Response) {
-  const { page = '1', limit = '20' } = req.query
+  const { page = '1', limit = '20', search, role, status } = req.query as Record<string, string | undefined>
+
+  const where: Record<string, unknown> = {}
+  if (status === 'suspended') {
+    where.deletedAt = { not: null }
+  } else if (status === 'active' || !status) {
+    where.deletedAt = null
+  }
+  if (role && ['user', 'curator', 'admin'].includes(role)) {
+    where.role = role
+  }
+  if (search) {
+    where.OR = [
+      { firstName: { contains: search, mode: 'insensitive' } },
+      { lastName: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+    ]
+  }
+
   const { data, meta } = await paginate({
     model: 'user',
-    where: { deletedAt: null },
+    where,
     page: Number(page),
     limit: Number(limit),
   })
@@ -144,6 +162,57 @@ export async function suspendUser(req: Request, res: Response) {
     data: { userId: req.user!.id, action: 'user.suspend', resource: 'user', resourceId: req.params.id },
   })
   return res.json({ data: { id: req.params.id, suspended: true }, status: 'success', code: 200 })
+}
+
+/**
+ * POST /api/admin/users/bulk-suspend
+ * PATCH /api/admin/users/bulk-unsuspend
+ * Suspend or unsuspend multiple users in a single transaction.
+ * Admins in the id list are skipped (cannot be suspended).
+ *
+ * Body: { ids: string[] }
+ */
+async function bulkSetUserSuspension(req: Request, res: Response, suspend: boolean) {
+  const { ids } = req.body as { ids?: unknown }
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ status: 'error', message: 'ids must be a non-empty array', code: 400 })
+  }
+
+  const targets = await db.user.findMany({
+    where: { id: { in: ids as string[] }, ...(suspend ? { role: { not: 'admin' } } : {}) },
+    select: { id: true },
+  })
+  const targetIds = targets.map((u) => u.id)
+
+  if (targetIds.length === 0) {
+    return res.json({ data: { updated: 0, suspended: suspend }, status: 'success', code: 200 })
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.user.updateMany({
+      where: { id: { in: targetIds } },
+      data: { deletedAt: suspend ? new Date() : null },
+    })
+    await tx.auditLog.createMany({
+      data: targetIds.map((id) => ({
+        userId: req.user!.id,
+        action: suspend ? 'user.bulk_suspend' : 'user.bulk_unsuspend',
+        resource: 'user',
+        resourceId: id,
+      })),
+    })
+  })
+
+  return res.json({ data: { updated: targetIds.length, suspended: suspend }, status: 'success', code: 200 })
+}
+
+export async function bulkSuspendUsers(req: Request, res: Response) {
+  return bulkSetUserSuspension(req, res, true)
+}
+
+export async function bulkUnsuspendUsers(req: Request, res: Response) {
+  return bulkSetUserSuspension(req, res, false)
 }
 
 export async function unsuspendUser(req: Request, res: Response) {

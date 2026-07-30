@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Suspense } from "react";
 import { AuthProvider } from "@/context/AuthContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { CompareProvider } from "@/context/CompareContext";
@@ -14,6 +15,19 @@ import WebVitalsReporter from "@/components/WebVitalsReporter";
 import OfflineBanner from "@/components/OfflineBanner";
 import InstallPrompt from "@/components/InstallPrompt";
 
+// ── Deferred (non-critical) component wrappers to reduce CLS ─────────────────
+function DeferredNonCritical() {
+  return (
+    <Suspense fallback={null}>
+      <WebVitalsReporter />
+      <OfflineBanner />
+      <InstallPrompt />
+      <CompareDrawer />
+      <OnboardingTour />
+    </Suspense>
+  );
+}
+
 export default async function LocaleLayout({ 
   children, 
   params: { locale } 
@@ -26,6 +40,14 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body>
+        {/* ═══ Resource hints for Core Web Vitals ═══ */}
+        <link rel="preconnect" href={process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000"} />
+        <link rel="dns-prefetch" href={process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000"} />
+        <link rel="preconnect" href="https://horizon-testnet.stellar.org" />
+        <link rel="dns-prefetch" href="https://horizon-testnet.stellar.org" />
+        <link rel="preconnect" href="https://unpkg.com" />
+        <link rel="dns-prefetch" href="https://unpkg.com" />
+
         <a href="#main-content" className="skip-to-main">
           Skip to main content
         </a>
@@ -34,17 +56,14 @@ export default async function LocaleLayout({
             <AuthProvider>
               <WalletProvider>
                 <CompareProvider>
-                  <WebVitalsReporter />
-                  <OfflineBanner />
-                  <InstallPrompt />
                   <div id="main-content" tabIndex={-1}>
                     {children}
                   </div>
-                  <CompareDrawer />
-                  <OnboardingTour />
+                  <DeferredNonCritical />
                 </CompareProvider>
               </WalletProvider>
             </AuthProvider>
+            {/* Toaster rendered at fixed position — no layout impact */}
             <Toaster position="bottom-right" richColors closeButton />
           </ThemeProvider>
         </NextIntlClientProvider>

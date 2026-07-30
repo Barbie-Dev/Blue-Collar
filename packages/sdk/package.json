@@ -1,0 +1,24 @@
+{
+  "name": "@bluecollar/sdk",
+  "version": "0.1.0",
+  "description": "Shared SDK for Stellar/contract interaction — consumed by API and App",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@bluecollar/types": "workspace:*",
+    "@stellar/stellar-sdk": "^13.0.0"
+  },
+  "devDependencies": {
+    "@bluecollar/test-utils": "workspace:*",
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  }
+}

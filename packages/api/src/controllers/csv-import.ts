@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { importWorkersFromCsv } from '../services/csv-import.service.js'
 import { handleError } from '../utils/handleError.js'
+import { getErrorMessage } from '../utils/getErrorMessage.js'
 
 /**
  * POST /api/admin/workers/import
@@ -24,9 +25,10 @@ export async function importWorkersFromCsvController(req: Request, res: Response
       message: `Imported ${result.imported} worker(s). ${result.failed} row(s) failed.`,
       code: result.imported > 0 ? 201 : 400,
     })
-  } catch (err: any) {
-    if (err?.message?.startsWith('Missing required CSV column')) {
-      return res.status(400).json({ status: 'error', message: err.message, code: 400 })
+  } catch (err) {
+    const message = getErrorMessage(err)
+    if (message.startsWith('Missing required CSV column')) {
+      return res.status(400).json({ status: 'error', message, code: 400 })
     }
     return handleError(res, err)
   }

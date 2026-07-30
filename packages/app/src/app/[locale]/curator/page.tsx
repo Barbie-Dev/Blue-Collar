@@ -8,6 +8,7 @@ import { Plus, X, AlertTriangle, Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { ListingsTable } from "@/components/Curator/ListingsTable";
 import type { CuratorWorker } from "@/components/Curator/ListingsTable";
+import ErrorState from "@/components/ErrorState";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
 
@@ -112,11 +113,7 @@ export default function CuratorConsolePage() {
         </Link>
       </div>
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState variant="inline" message={error} className="mb-4" />}
 
       {/* Listings */}
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">

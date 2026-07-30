@@ -27,6 +27,7 @@
 | `VAPID_PUBLIC_KEY` | string | — | yes | Web Push VAPID public key |
 | `VAPID_PRIVATE_KEY` | string | — | yes | Web Push VAPID private key |
 | `HORIZON_URL` | string | `https://horizon-testnet.stellar.org` | yes | Stellar Horizon base URL |
+| `STELLAR_NETWORK` | string | `testnet` | no | `testnet` \| `mainnet` — controls SDK defaults |
 | `REGISTRY_CONTRACT_ID` | string | — | yes | Soroban Registry contract ID |
 | `MARKET_CONTRACT_ID` | string | — | yes | Soroban Market contract ID |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | string | — | no | OpenTelemetry collector endpoint |
@@ -50,6 +51,33 @@
 | `NEXT_PUBLIC_REGISTRY_CONTRACT_ID` | string | — | yes | Registry contract ID |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | string | — | yes | Web Push VAPID public key |
 
+## Monitoring (`packages/monitoring`)
+
+| Variable | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `STELLAR_RPC_URL` | string | `https://soroban-testnet.stellar.org` | yes | Soroban RPC endpoint to poll for contract events |
+| `REGISTRY_CONTRACT_ID` | string | — | yes | Registry contract ID to monitor |
+| `MARKET_CONTRACT_ID` | string | — | yes | Market contract ID to monitor |
+| `ALERT_WEBHOOK_URL` | string | — | no | Webhook URL for critical-event alerts |
+
+## Mobile (`packages/mobile`)
+
+No `.env.example` is checked in — Expo reads `EXPO_PUBLIC_*` variables from the shell
+environment or an untracked `.env` at `packages/mobile/`.
+
+| Variable | Type | Default | Required | Description |
+|---|---|---|---|---|
+| `EXPO_PUBLIC_API_URL` | string | `http://localhost:3000/api` | no | API base URL |
+
+## Contracts (`packages/contracts`)
+
+Contracts don't read environment variables at build or deploy time — deploy parameters
+(`SOURCE`, `ADMIN`, `FEE_RECIPIENT`, `FEE_BPS`, `--network`) are passed as `make`
+arguments or CLI flags instead. See
+[packages/contracts/README.md](../packages/contracts/README.md#deploy).
+
 ## Startup Validation
 
-The API fails fast on startup if any required variable is missing. To add a variable to the required-check list, edit `packages/api/src/config.ts` (or the equivalent env-validation module).
+The API fails fast on startup if any required variable is missing. All environment access is centralised in `packages/api/src/config/config.ts` — no code outside that file reads `process.env` directly. The typed `config` object is re-exported from `packages/api/src/config/env.ts` for backwards compatibility.
+
+To add a new variable: add it to `config.ts` using `required()` or `optional()` helpers, then document it in this table. Startup will throw a descriptive error message if a required key is absent.

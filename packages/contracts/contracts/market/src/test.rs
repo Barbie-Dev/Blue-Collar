@@ -578,3 +578,368 @@ mod upgrade_framework {
         f.client().migrate(&stranger, &1u32);
     }
 }
+
+// ===========================================================================
+// Pause / emergency-stop tests (#785)
+// ===========================================================================
+
+#[cfg(test)]
+mod pause_tests {
+    use super::*;
+
+    /// Shared fixture: admin holds ROLE_PAUSER, payer has tokens, one escrow open.
+    struct PauseFixture {
+        env: Env,
+        contract: Address,
+        admin: Address,
+        from: Address,
+        to: Address,
+        token: Address,
+    }
+
+    impl PauseFixture {
+        fn new() -> Self {
+            let (env, admin, fee_recipient, from, to, token) = setup();
+            let contract = deploy(&env);
+            init(&env, &contract, &admin, 0, &fee_recipient);
+            let client = MarketContractClient::new(&env, &contract);
+            client.grant_role(&admin, &Symbol::new(&env, ROLE_PAUSER), &admin);
+            PauseFixture { env, contract, admin, from, to, token }
+        }
+        fn client(&self) -> MarketContractClient {
+            MarketContractClient::new(&self.env, &self.contract)
+        }
+    }
+
+    // -- pause / unpause state ------------------------------------------------
+
+    #[test]
+    fn pause_sets_paused_flag() {
+        let f = PauseFixture::new();
+        assert!(!f.client().is_paused());
+        f.client().pause(&f.admin);
+        assert!(f.client().is_paused());
+    }
+
+    #[test]
+    fn unpause_clears_paused_flag() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        f.client().unpause(&f.admin);
+        assert!(!f.client().is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "Missing role")]
+    fn pause_requires_pauser_role() {
+        let f = PauseFixture::new();
+        let stranger = Address::generate(&f.env);
+        f.client().pause(&stranger);
+    }
+
+    #[test]
+    #[should_panic(expected = "Missing role")]
+    fn unpause_requires_pauser_role() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        let stranger = Address::generate(&f.env);
+        f.client().unpause(&stranger);
+    }
+
+    // -- mutations blocked while paused ---------------------------------------
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn tip_blocked_when_paused() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        f.client().tip(&f.from, &f.to, &f.token, &100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn create_escrow_blocked_when_paused() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        let id = Symbol::new(&f.env, "esc1");
+        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn release_escrow_blocked_when_paused() {
+        let f = PauseFixture::new();
+        // Create escrow before pausing
+        let id = Symbol::new(&f.env, "esc1");
+        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+        f.client().pause(&f.admin);
+        f.client().release_escrow(&id, &f.from);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn cancel_escrow_blocked_when_paused() {
+        let f = PauseFixture::new();
+        set_time(&f.env, 1000);
+        let id = Symbol::new(&f.env, "esc1");
+        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &2000);
+        f.client().pause(&f.admin);
+        set_time(&f.env, 3000);
+        f.client().cancel_escrow(&id, &f.from);
+    }
+
+    // -- read-only calls unaffected ------------------------------------------
+
+    #[test]
+    fn get_escrow_works_while_paused() {
+        let f = PauseFixture::new();
+        let id = Symbol::new(&f.env, "esc1");
+        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+        f.client().pause(&f.admin);
+        // Should NOT panic
+        let escrow = f.client().get_escrow(&id);
+        assert!(escrow.is_some());
+    }
+
+    #[test]
+    fn is_paused_works_while_paused() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        assert!(f.client().is_paused());
+    }
+
+    // -- operations succeed after unpause ------------------------------------
+
+    #[test]
+    fn tip_succeeds_after_unpause() {
+        let f = PauseFixture::new();
+        f.client().pause(&f.admin);
+        f.client().unpause(&f.admin);
+        // Should NOT panic
+        f.client().tip(&f.from, &f.to, &f.token, &100);
+        assert_eq!(
+            TokenClient::new(&f.env, &f.token).balance(&f.to),
+            100
+        );
+    }
+}
+
+// ===========================================================================
+// #788 – Multi-asset support & trustline pre-checks
+// ===========================================================================
+//
+// The Market contract accepts any SEP-41 token; the `token::Client` call itself
+// acts as the trustline check — a transfer from an account that hasn't
+// established a trustline will panic with a host-level error before any state
+// is written.  These tests verify:
+//   1. XLM, a second custom token (simulating USDC), and a third token all work.
+//   2. Using the wrong token address fails gracefully (no partial state write).
+//   3. A zero-balance payer fails on the token-contract level, not silently.
+
+#[cfg(test)]
+mod multi_asset_tests {
+    use super::*;
+    use soroban_sdk::token::StellarAssetClient;
+
+    struct AssetFixture {
+        env: Env,
+        contract: Address,
+        admin: Address,
+        payer: Address,
+        worker: Address,
+        xlm: Address,
+        usdc: Address,
+        custom: Address,
+    }
+
+    impl AssetFixture {
+        fn new() -> Self {
+            let (env, admin, fee_recipient, payer, worker, xlm) = setup();
+            let contract = deploy(&env);
+            init(&env, &contract, &admin, 0, &fee_recipient);
+
+            // Second token — simulates USDC (same SEP-41 interface, different issuer)
+            let usdc_id = env.register_stellar_asset_contract_v2(admin.clone());
+            let usdc = usdc_id.address();
+            StellarAssetClient::new(&env, &usdc).mint(&payer, &5_000);
+
+            // Third custom token
+            let custom_id = env.register_stellar_asset_contract_v2(admin.clone());
+            let custom = custom_id.address();
+            StellarAssetClient::new(&env, &custom).mint(&payer, &2_000);
+
+            AssetFixture { env, contract, admin, payer, worker, xlm, usdc, custom }
+        }
+
+        fn client(&self) -> MarketContractClient {
+            MarketContractClient::new(&self.env, &self.contract)
+        }
+
+        fn balance(&self, token: &Address, addr: &Address) -> i128 {
+            TokenClient::new(&self.env, token).balance(addr)
+        }
+    }
+
+    // ── Tip with multiple asset types ────────────────────────────────────────
+
+    #[test]
+    fn tip_with_xlm_succeeds() {
+        let f = AssetFixture::new();
+        f.client().tip(&f.payer, &f.worker, &f.xlm, &1_000);
+        assert_eq!(f.balance(&f.xlm, &f.worker), 1_000);
+    }
+
+    #[test]
+    fn tip_with_usdc_succeeds() {
+        let f = AssetFixture::new();
+        f.client().tip(&f.payer, &f.worker, &f.usdc, &500);
+        assert_eq!(f.balance(&f.usdc, &f.worker), 500);
+        assert_eq!(f.balance(&f.usdc, &f.payer), 4_500);
+    }
+
+    #[test]
+    fn tip_with_custom_token_succeeds() {
+        let f = AssetFixture::new();
+        f.client().tip(&f.payer, &f.worker, &f.custom, &200);
+        assert_eq!(f.balance(&f.custom, &f.worker), 200);
+    }
+
+    #[test]
+    fn tip_tokens_are_isolated() {
+        // Tipping with USDC must not affect XLM balance and vice versa.
+        let f = AssetFixture::new();
+        f.client().tip(&f.payer, &f.worker, &f.usdc, &300);
+        assert_eq!(f.balance(&f.xlm, &f.worker), 0, "XLM should be unaffected by USDC tip");
+        assert_eq!(f.balance(&f.usdc, &f.worker), 300);
+    }
+
+    // ── Escrow with multiple asset types ─────────────────────────────────────
+
+    #[test]
+    fn escrow_create_and_release_with_usdc() {
+        let f = AssetFixture::new();
+        let id = Symbol::new(&f.env, "usdc_esc");
+        f.client().create_escrow(&id, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
+        assert_eq!(f.balance(&f.usdc, &f.payer), 4_000);
+        assert_eq!(f.balance(&f.usdc, &f.contract), 1_000);
+
+        f.client().release_escrow(&id, &f.payer);
+        assert_eq!(f.balance(&f.usdc, &f.worker), 1_000);
+        assert_eq!(f.balance(&f.usdc, &f.contract), 0);
+    }
+
+    #[test]
+    fn escrow_create_and_cancel_with_custom_token() {
+        let f = AssetFixture::new();
+        set_time(&f.env, 1_000);
+        let id = Symbol::new(&f.env, "ctok_esc");
+        f.client().create_escrow(&id, &f.payer, &f.worker, &f.custom, &500, &2_000);
+        set_time(&f.env, 3_000);
+        f.client().cancel_escrow(&id, &f.payer);
+        assert_eq!(f.balance(&f.custom, &f.payer), 2_000);
+    }
+
+    #[test]
+    fn concurrent_escrows_in_different_tokens() {
+        // Two open escrows, each in a different asset — releasing one must not
+        // affect the other.
+        let f = AssetFixture::new();
+        let id1 = Symbol::new(&f.env, "e1");
+        let id2 = Symbol::new(&f.env, "e2");
+        f.client().create_escrow(&id1, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
+        f.client().create_escrow(&id2, &f.payer, &f.worker, &f.custom, &500, &9_999);
+
+        f.client().release_escrow(&id1, &f.payer);
+        // id2 (custom) must still be locked
+        let esc2 = f.client().get_escrow(&id2).unwrap();
+        assert!(!esc2.released);
+        assert_eq!(f.balance(&f.usdc, &f.worker), 1_000);
+        assert_eq!(f.balance(&f.custom, &f.worker), 0);
+    }
+
+    // ── Trustline / insufficient-balance graceful failure ────────────────────
+    //
+    // On the Stellar network a missing trustline causes the token transfer to
+    // fail at the host level. In the test environment this surfaces as a panic
+    // from the token contract. We verify that no state is written when the
+    // transfer fails (escrow must not exist afterward).
+
+    #[test]
+    #[should_panic]
+    fn tip_with_zero_balance_token_panics_gracefully() {
+        let f = AssetFixture::new();
+        // Payer has no balance in `xlm` beyond the initial 10_000, but minting
+        // nothing for a brand-new address means that address has 0 balance.
+        let broke = Address::generate(&f.env);
+        // `broke` holds no USDC — transfer must fail at the token level.
+        f.client().tip(&broke, &f.worker, &f.usdc, &1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn create_escrow_insufficient_balance_panics_gracefully() {
+        let f = AssetFixture::new();
+        let broke = Address::generate(&f.env);
+        // No tokens minted for `broke` — create_escrow transfer must fail.
+        let id = Symbol::new(&f.env, "broke_esc");
+        f.client().create_escrow(&id, &broke, &f.worker, &f.usdc, &1, &9_999);
+        // Verify no partial state was written
+        assert!(f.client().get_escrow(&id).is_none(), "escrow must not be stored after failed transfer");
+    }
+
+    #[test]
+    fn escrow_not_created_on_transfer_failure() {
+        // Mirror of the above but uses catch_unwind to assert the escrow key
+        // was not written. We verify by confirming get_escrow returns None after
+        // the panic is caught.
+        let f = AssetFixture::new();
+        let id = Symbol::new(&f.env, "fail_esc");
+        let broke = Address::generate(&f.env);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f.client().create_escrow(&id, &broke, &f.worker, &f.usdc, &100, &9_999);
+        }));
+        // The escrow must not exist in storage after a failed create.
+        assert!(f.client().get_escrow(&id).is_none());
+    }
+
+    // ── Fee deduction works correctly across asset types ──────────────────────
+
+    #[test]
+    fn tip_fee_deducted_correctly_for_usdc() {
+        let (env, admin, _fee_recipient, payer, worker, _xlm) = setup();
+        let treasury = Address::generate(&env);
+        let contract = deploy(&env);
+        init(&env, &contract, &admin, 200, &treasury); // 2%
+
+        let usdc_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let usdc = usdc_id.address();
+        StellarAssetClient::new(&env, &usdc).mint(&payer, &10_000);
+
+        MarketContractClient::new(&env, &contract).tip(&payer, &worker, &usdc, &5_000);
+
+        // fee = 5000 * 200 / 10_000 = 100
+        assert_eq!(TokenClient::new(&env, &usdc).balance(&worker), 4_900);
+        assert_eq!(TokenClient::new(&env, &usdc).balance(&treasury), 100);
+    }
+
+    #[test]
+    fn escrow_release_fee_deducted_for_custom_token() {
+        let (env, admin, _fee_recipient, payer, worker, _xlm) = setup();
+        let treasury = Address::generate(&env);
+        let contract = deploy(&env);
+        init(&env, &contract, &admin, 100, &treasury); // 1%
+
+        let tok_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let tok = tok_id.address();
+        StellarAssetClient::new(&env, &tok).mint(&payer, &10_000);
+
+        let client = MarketContractClient::new(&env, &contract);
+        let id = Symbol::new(&env, "fee_esc");
+        client.create_escrow(&id, &payer, &worker, &tok, &2_000, &9_999);
+        client.release_escrow(&id, &payer);
+
+        // fee = 2000 * 100 / 10_000 = 20
+        assert_eq!(TokenClient::new(&env, &tok).balance(&worker), 1_980);
+        assert_eq!(TokenClient::new(&env, &tok).balance(&treasury), 20);
+    }
+}

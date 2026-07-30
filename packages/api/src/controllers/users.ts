@@ -1,16 +1,21 @@
+/**
+ * Users controller — thin HTTP layer.
+ * Parses request input, delegates to the user service, and formats responses.
+ * All error handling flows through the global errorHandler middleware via catchAsync.
+ */
 import type { Request, Response } from 'express'
-import argon2 from 'argon2'
+import { catchAsync } from '../utils/catchAsync.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 import { db } from '../db.js'
 import { sanitizeUser } from '../models/user.model.js'
 import * as userService from '../services/user.service.js'
-import { logger } from '../config/logger.js'
 import { ErrorMessages, HttpStatus } from '../constants/index.js'
 
 // ── Profile update ────────────────────────────────────────────────────────────
 
-export async function updateProfile(req: Request, res: Response) {
+export const updateProfile = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
   const { firstName, lastName, phone, bio, onboardingCompleted } = req.body as {
     firstName?: string
@@ -20,156 +25,87 @@ export async function updateProfile(req: Request, res: Response) {
     onboardingCompleted?: boolean
   }
 
-  try {
-    const user = await db.user.update({
-      where: { id: userId },
-      data: {
-        ...(firstName !== undefined && { firstName }),
-        ...(lastName !== undefined && { lastName }),
-        ...(phone !== undefined && { phone }),
-        ...(bio !== undefined && { bio }),
-        ...(onboardingCompleted !== undefined && { onboardingCompleted }),
-      },
-    })
-    return res.json({ data: sanitizeUser(user), status: 'success', code: HttpStatus.OK })
-  } catch (error) {
-    logger.error({ err: error }, '[updateProfile] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_UPDATE_PROFILE, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+  const user = await db.user.update({
+    where: { id: userId },
+    data: {
+      ...(firstName !== undefined && { firstName }),
+      ...(lastName !== undefined && { lastName }),
+      ...(phone !== undefined && { phone }),
+      ...(bio !== undefined && { bio }),
+      ...(onboardingCompleted !== undefined && { onboardingCompleted }),
+    },
+  })
+  return res.json({ data: sanitizeUser(user), status: 'success', code: HttpStatus.OK })
+})
 
-export async function updateMe(req: Request, res: Response) {
+export const updateMe = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
-  try {
-    const user = await userService.updateProfile(userId, req.body)
-    return res.json({ data: user, status: 'success', code: 200 })
-  } catch (error: any) {
-    if (error?.name === 'ZodError') {
-      return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: 'Validation failed', code: HttpStatus.BAD_REQUEST, errors: error.errors })
-    }
-    if (error?.statusCode) {
-      return res.status(error.statusCode).json({ status: 'error', message: error.message, code: error.statusCode })
-    }
-    console.error('[updateProfile] error:', error)
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_UPDATE_PROFILE, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+  const user = await userService.updateProfile(userId, req.body)
+  return res.json({ data: user, status: 'success', code: HttpStatus.OK })
+})
 
 // ── Change password ───────────────────────────────────────────────────────────
 
-export async function changePassword(req: Request, res: Response) {
+export const changePassword = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
-  const { currentPassword, newPassword } = req.body as {
-    currentPassword?: string
-    newPassword?: string
-  }
+  const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string }
 
   if (!currentPassword || !newPassword) {
-    return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.CURRENT_PASSWORD_REQUIRED, code: HttpStatus.BAD_REQUEST })
-  }
-  if (newPassword.length < 8) {
-    return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.PASSWORD_TOO_SHORT, code: HttpStatus.BAD_REQUEST })
+    throw new AppError(ErrorMessages.CURRENT_PASSWORD_REQUIRED, HttpStatus.BAD_REQUEST, true, ErrorCode.VALIDATION_ERROR)
   }
 
-  try {
-    const user = await db.user.findUnique({ where: { id: userId } })
-    if (!user || !user.password) {
-      return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.OAUTH_ACCOUNT_NO_PASSWORD, code: HttpStatus.BAD_REQUEST })
-    }
-
-    const valid = await argon2.verify(user.password, currentPassword)
-    if (!valid) {
-      return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.CURRENT_PASSWORD_INCORRECT, code: HttpStatus.BAD_REQUEST })
-    }
-
-    const hashed = await argon2.hash(newPassword)
-    await db.user.update({ where: { id: userId }, data: { password: hashed } })
-    return res.json({ status: 'success', message: 'Password updated', code: HttpStatus.OK })
-  } catch (error) {
-    logger.error({ err: error }, '[changePassword] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_CHANGE_PASSWORD, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+  await userService.changePassword(userId, currentPassword, newPassword)
+  return res.json({ status: 'success', message: 'Password updated', code: HttpStatus.OK })
+})
 
 // ── Delete account ────────────────────────────────────────────────────────────
 
-export async function deleteAccount(req: Request, res: Response) {
+export const deleteAccount = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
-  try {
-    await db.user.delete({ where: { id: userId } })
-    return res.json({ status: 'success', message: 'Account deleted', code: HttpStatus.OK })
-  } catch (error) {
-    logger.error({ err: error }, '[deleteAccount] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_DELETE_ACCOUNT, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+  await userService.deleteAccount(userId)
+  return res.json({ status: 'success', message: 'Account deleted', code: HttpStatus.OK })
+})
 
 // ── Push subscriptions ────────────────────────────────────────────────────────
 
-export async function savePushSubscription(req: Request, res: Response) {
+export const savePushSubscription = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
   const { endpoint, keys } = req.body
   if (!endpoint || !keys?.auth || !keys?.p256dh) {
-    return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.INVALID_PUSH_SUBSCRIPTION, code: HttpStatus.BAD_REQUEST })
+    throw new AppError(ErrorMessages.INVALID_PUSH_SUBSCRIPTION, HttpStatus.BAD_REQUEST, true, ErrorCode.VALIDATION_ERROR)
   }
 
-  try {
-    const subscription = await db.pushSubscription.upsert({
-      where: { userId_endpoint: { userId, endpoint } },
-      update: { auth: keys.auth, p256dh: keys.p256dh },
-      create: { userId, endpoint, auth: keys.auth, p256dh: keys.p256dh },
-    })
+  const subscription = await userService.savePushSubscription(userId, { endpoint, keys })
+  return res.json({ data: subscription, status: 'success', code: HttpStatus.CREATED })
+})
 
-    return res.json({ data: subscription, status: 'success', code: HttpStatus.CREATED })
-  } catch (error) {
-    logger.error({ err: error }, '[savePushSubscription] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_SAVE_SUBSCRIPTION, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
-
-export async function deletePushSubscription(req: Request, res: Response) {
+export const deletePushSubscription = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
   const { endpoint } = req.body
   if (!endpoint) {
-    return res.status(HttpStatus.BAD_REQUEST).json({ status: 'error', message: ErrorMessages.ENDPOINT_REQUIRED, code: HttpStatus.BAD_REQUEST })
+    throw new AppError(ErrorMessages.ENDPOINT_REQUIRED, HttpStatus.BAD_REQUEST, true, ErrorCode.VALIDATION_ERROR)
   }
 
-  try {
-    await db.pushSubscription.delete({
-      where: { userId_endpoint: { userId, endpoint } },
-    })
+  await userService.deletePushSubscription(userId, endpoint)
+  return res.json({ status: 'success', message: 'Unsubscribed', code: HttpStatus.OK })
+})
 
-    return res.json({ status: 'success', message: 'Unsubscribed', code: HttpStatus.OK })
-  } catch (error) {
-    logger.error({ err: error }, '[deletePushSubscription] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_UNSUBSCRIBE, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+// ── Onboarding ────────────────────────────────────────────────────────────────
 
-// ── Onboarding ────────────────────────────────────────────────────────────
-
-export async function completeOnboarding(req: Request, res: Response) {
+export const completeOnboarding = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.id
-  if (!userId) return res.status(HttpStatus.UNAUTHORIZED).json({ status: 'error', message: ErrorMessages.UNAUTHORIZED, code: HttpStatus.UNAUTHORIZED })
+  if (!userId) throw new AppError(ErrorMessages.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, true, ErrorCode.UNAUTHORIZED)
 
-  try {
-    const user = await db.user.update({
-      where: { id: userId },
-      data: { onboardingCompleted: true },
-    })
-    return res.json({ data: sanitizeUser(user), status: 'success', message: 'Onboarding completed', code: HttpStatus.OK })
-  } catch (error) {
-    logger.error({ err: error }, '[completeOnboarding] error')
-    return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ status: 'error', message: ErrorMessages.FAILED_ONBOARDING, code: HttpStatus.INTERNAL_SERVER_ERROR })
-  }
-}
+  const user = await userService.completeOnboarding(userId)
+  return res.json({ data: user, status: 'success', message: 'Onboarding completed', code: HttpStatus.OK })
+})

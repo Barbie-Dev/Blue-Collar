@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { db } from '../db.js'
 import { AppError } from '../services/AppError.js'
 import { dispatchNotification } from '../services/notification.service.js'
@@ -56,8 +57,8 @@ export async function listJobs(opts: {
   await expireJobs()
   const { categoryId, status = 'open', search, skills, urgency, minBudget, maxBudget, page = 1, limit = 20 } = opts
 
-  const where: any = {
-    ...(status !== 'all' ? { status } : {}),
+  const where: Prisma.JobWhereInput = {
+    ...(status !== 'all' ? { status: status as Prisma.JobWhereInput['status'] } : {}),
     ...(categoryId ? { categoryId } : {}),
     ...(urgency ? { urgency } : {}),
     ...(minBudget !== undefined || maxBudget !== undefined

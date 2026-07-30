@@ -222,3 +222,164 @@ proptest! {
         assert!(result.is_err(), "Expected panic for fee_bps={fee_bps}");
     }
 }
+
+proptest! {
+    // =========================================================================
+    // #786 – Multi-asset invariants
+    // =========================================================================
+
+    /// Fuzz: tip with a second (USDC-style) token preserves the same fee
+    /// arithmetic as with the native token.
+    #[test]
+    fn fuzz_tip_multi_asset_fee_invariant(
+        amount in 1i128..=1_000_000i128,
+        fee_bps in 0u32..=500u32,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let worker = Address::generate(&env);
+
+        // Register a "USDC-style" second token
+        let usdc_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let usdc = usdc_id.address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &usdc).mint(&payer, &1_000_000);
+
+        let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
+        let client = bluecollar_market::MarketContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &fee_bps, &admin);
+        client.grant_role(&admin, &Symbol::new(&env, "fee_mgr"), &admin);
+
+        let w_before = TokenClient::new(&env, &usdc).balance(&worker);
+        client.tip(&payer, &worker, &usdc, &amount);
+
+        let fee = (amount * fee_bps as i128) / 10_000;
+        // Invariant: worker receives amount minus fee regardless of token type
+        prop_assert_eq!(TokenClient::new(&env, &usdc).balance(&worker), w_before + amount - fee);
+    }
+
+    /// Fuzz: escrow over multiple tokens — release always transfers the exact
+    /// locked amount to the worker (no fee on zero-fee contracts).
+    #[test]
+    fn fuzz_multi_asset_escrow_release_exact(
+        amount in 1i128..=500_000i128,
+        escrow_id in "[a-z]{1,12}".prop_map(|s| s),
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let worker = Address::generate(&env);
+
+        let tok_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let tok = tok_id.address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &tok).mint(&payer, &1_000_000);
+
+        let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
+        let client = bluecollar_market::MarketContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &0, &admin);
+
+        let id = Symbol::new(&env, &escrow_id);
+        client.create_escrow(&id, &payer, &worker, &tok, &amount, &9_999_999);
+        client.release_escrow(&id, &payer);
+
+        // Invariant: worker receives exactly the locked amount
+        prop_assert_eq!(TokenClient::new(&env, &tok).balance(&worker), amount);
+    }
+
+    // =========================================================================
+    // #786 – Auth-bypass attempts
+    // =========================================================================
+
+    /// Fuzz: a random stranger must never successfully release an escrow
+    /// they did not create and are not the worker of.
+    /// mock_all_auths() bypasses require_auth() but NOT the from/to identity
+    /// check — a stranger must always receive "Not authorized".
+    #[test]
+    fn fuzz_auth_bypass_release_escrow(
+        amount in 1i128..=500_000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let worker = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        let tok_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let tok = tok_id.address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &tok).mint(&payer, &1_000_000);
+
+        let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
+        let client = bluecollar_market::MarketContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &0, &admin);
+
+        let id = Symbol::new(&env, "authesc");
+        client.create_escrow(&id, &payer, &worker, &tok, &amount, &9_999_999);
+
+        // Stranger release must panic (identity check, not auth check).
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.release_escrow(&id, &stranger);
+        }));
+        prop_assert!(result.is_err(), "stranger must not release escrow — auth bypass detected");
+
+        // Escrow is still active and worker has received nothing.
+        let esc = client.get_escrow(&id).unwrap();
+        prop_assert!(!esc.released, "escrow must remain unreleased after failed stranger attempt");
+        prop_assert_eq!(TokenClient::new(&env, &tok).balance(&worker), 0);
+    }
+
+    // =========================================================================
+    // #786 – Overflow / underflow safety
+    // =========================================================================
+
+    /// Fuzz: fee computation on maximum i128 amounts must not overflow.
+    /// fee_bps <= 500, amount <= i128::MAX / 10_000 to stay in range.
+    #[test]
+    fn fuzz_fee_no_overflow(
+        // Keep amount in a range where amount * 500 < i128::MAX
+        amount in 1i128..=i128::MAX / 501,
+        fee_bps in 0u32..=500u32,
+    ) {
+        // We only test the pure fee arithmetic used in the contract
+        let fee: i128 = (amount * fee_bps as i128) / 10_000;
+        let worker_amount: i128 = amount - fee;
+        // Invariants: no underflow, fee in [0, amount], worker_amount >= 0
+        prop_assert!(fee >= 0);
+        prop_assert!(worker_amount >= 0);
+        prop_assert!(fee + worker_amount == amount);
+    }
+
+    /// Fuzz: escrow amount must always be exactly preserved in storage (no
+    /// truncation or overflow from the i128 path).
+    #[test]
+    fn fuzz_escrow_amount_exact_storage(
+        amount in 1i128..=1_000_000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let worker = Address::generate(&env);
+
+        let tok_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let tok = tok_id.address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &tok).mint(&payer, &1_000_000);
+
+        let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
+        let client = bluecollar_market::MarketContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &0, &admin);
+
+        let id = Symbol::new(&env, "ovflow");
+        client.create_escrow(&id, &payer, &worker, &tok, &amount, &9_999_999);
+
+        // Invariant: stored amount equals the amount passed in
+        let esc = client.get_escrow(&id).unwrap();
+        prop_assert_eq!(esc.amount, amount);
+    }
+}

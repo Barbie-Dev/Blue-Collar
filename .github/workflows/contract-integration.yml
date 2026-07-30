@@ -1,0 +1,54 @@
+name: Contract Integration Tests
+
+# End-to-end contract integration tests against the in-process Soroban testnet (#816).
+# Deploys registry + market contracts and exercises register/tip/escrow flows.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/contracts/**"
+      - ".github/workflows/contract-integration.yml"
+  pull_request:
+    paths:
+      - "packages/contracts/**"
+      - ".github/workflows/contract-integration.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: packages/contracts
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/contracts/target
+          key: ${{ runner.os }}-contracts-integration-${{ hashFiles('packages/contracts/**/Cargo.toml', 'packages/contracts/Cargo.lock') }}
+
+      - name: Run integration tests
+        run: cargo test -p bluecollar-integration --tests -- --nocapture
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Contract Integration Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ran registry + market end-to-end flows:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Registry: initialize → add_curator → register → get_worker → toggle" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Market: initialize → tip (fee split) → create_escrow → release_escrow" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cross-contract: register worker then tip end-to-end" >> "$GITHUB_STEP_SUMMARY"
