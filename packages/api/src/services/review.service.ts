@@ -36,10 +36,17 @@ export async function createReview(
   workerId: string,
   authorId: string,
   rating: number,
+  body: string,
   comment?: string,
   transactionHash?: string,
 ) {
-  if (rating < 1 || rating > 5) throw new AppError('Rating must be between 1 and 5', 400)
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new AppError('Rating must be between 1 and 5', 400)
+  }
+
+  if (!body || !body.trim()) {
+    throw new AppError('Review body is required', 400)
+  }
 
   const worker = await db.worker.findUnique({ where: { id: workerId } })
   if (!worker) throw new AppError('Worker not found', 404)
@@ -71,6 +78,8 @@ export async function createReview(
   })
 }
 
+// ─── listReviews ──────────────────────────────────────────────────────────────
+
 /**
  * Return a paginated list of reviews for a worker, plus aggregate stats and rating distribution.
  * Includes caching for performance.
@@ -85,7 +94,9 @@ export async function listReviews(workerId: string, page: number, limit: number,
       skip: (page - 1) * limit,
       take: limit,
       orderBy: { createdAt: 'desc' },
-      include: { author: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+      include: {
+        author: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+      },
     }),
     db.review.count({ where }),
     db.review.aggregate({ where: baseWhere, _avg: { rating: true } }),
@@ -94,7 +105,6 @@ export async function listReviews(workerId: string, page: number, limit: number,
 
   const totalReviews = await db.review.count({ where: baseWhere })
 
-  // Build distribution: { 1: { count, percentage }, ..., 5: { count, percentage } }
   const distribution = [5, 4, 3, 2, 1].map((star) => {
     const entry = allRatings.find((r) => r.rating === star)
     const count = entry?._count.rating ?? 0

@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
-import { db } from '../db.js'
+import { authenticate, authorize } from '../middleware/auth.js'
+import { handleError } from '../utils/handleError.js'
 import {
   listReviews,
   createReview,
@@ -55,10 +56,20 @@ export async function deleteReview(req: Request, res: Response) {
   if (review.authorId !== req.user!.id) {
     return res.status(403).json({ status: 'error', message: 'Forbidden', code: 403 })
   }
+})
 
-  await db.review.delete({ where: { id: req.params.id } })
-  return res.status(204).send()
-}
+/**
+ * PATCH /api/workers/:workerId/reviews/:id/flag
+ * Flag a review for moderation.
+ */
+router.patch('/:id/flag', authenticate, async (req: Request, res: Response) => {
+  try {
+    const updated = await flagReview(req.params.id, req.body.reason)
+    return res.json({ data: updated, status: 'success', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+})
 
 router.get('/', listReviews)
 router.post('/', authenticate, createReview)
