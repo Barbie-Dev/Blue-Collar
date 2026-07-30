@@ -8,6 +8,8 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "husky",
+    "commitlint": "commitlint --from HEAD~1",
     "dev": "concurrently \"pnpm --filter @bluecollar/api dev\" \"pnpm --filter @bluecollar/app dev\"",
     "build": "pnpm --filter @bluecollar/api build && pnpm --filter @bluecollar/app build",
     "test": "pnpm --filter @bluecollar/api test && pnpm --filter @bluecollar/app test",
@@ -21,7 +23,10 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
+    "@commitlint/cli": "^18.4.0",
+    "@commitlint/config-conventional": "^18.4.0",
     "concurrently": "^9.1.2",
+    "husky": "^9.0.0",
     "prettier": "^3.5.3"
   },
   "license": "MIT",
