@@ -181,8 +181,7 @@ describe('myApplications', () => {
     await controller.myApplications(makeReq(), res, next)
     await flush()
 
-    expect(res.status).toHaveBeenCalledWith(400)
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }))
   })
 
   it('passes workerId and pagination through to the service', async () => {
@@ -236,7 +235,7 @@ describe('withdrawApplication', () => {
     await controller.withdrawApplication(makeReq({ params: { id: 'job-1' } as any }), res, next)
     await flush()
 
-    expect(res.status).toHaveBeenCalledWith(400)
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }))
   })
 
   it('withdraws the application when workerId is provided', async () => {
