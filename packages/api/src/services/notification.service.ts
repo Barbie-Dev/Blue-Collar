@@ -26,12 +26,20 @@ interface DeliveryLog {
 const deliveryCache = new Map<string, DeliveryLog[]>()
 const DEDUP_WINDOW = 60000 // 1 minute
 
-export async function dispatchNotification(payload: NotificationPayload): Promise<void> {
-  const prefs = await db.notificationPreferences.findUnique({
-    where: { userId: payload.userId },
-  })
+const DEFAULT_PREFERENCES = {
+  newWorkerNearby: true,
+  statusChange: true,
+  reviewReply: true,
+  announcements: true,
+}
 
-  if (!prefs) return
+export async function dispatchNotification(payload: NotificationPayload): Promise<void> {
+  // Users without a persisted preferences row (e.g. anyone who hasn't visited
+  // the preferences page yet) should still receive notifications by default —
+  // falling back here instead of no-op'ing keeps first-time delivery working.
+  const prefs = (await db.notificationPreferences.findUnique({
+    where: { userId: payload.userId },
+  })) ?? DEFAULT_PREFERENCES
 
   const channels = payload.channels || ['email', 'push', 'inapp']
   const dedupKey = `${payload.userId}:${payload.type}:${payload.message}`
@@ -125,19 +133,33 @@ async function sendEmailNotification(payload: NotificationPayload): Promise<void
   })
 }
 
-function shouldSendEmail(prefs: any, type: string): boolean {
-  const typeMap: Record<string, keyof typeof prefs> = {
-    'worker_nearby': 'newWorkerNearby',
-    'status_change': 'statusChange',
-    'review_reply': 'reviewReply',
-    'announcement': 'announcements',
-  }
-  return prefs[typeMap[type]] ?? true
+/**
+ * Minimal view of a user's notification preferences that the dispatch gates
+ * depend on. Both a persisted `NotificationPreferences` row and the in-memory
+ * `DEFAULT_PREFERENCES` fallback satisfy this shape.
+ */
+interface NotificationPrefsView {
+  reviewReply: boolean
+  announcements: boolean
 }
 
-function shouldSendPush(prefs: any, type: string): boolean {
+function shouldSendEmail(prefs: NotificationPrefsView, type: string): boolean {
+  // Keyed on the real NotificationType enum values (tip/review/contact/system/message) —
+  // 'worker_nearby'/'status_change'/'review_reply'/'announcement' never match any
+  // actual dispatch call site (every caller uses 'system'), so preferences never
+  // took effect. 'newWorkerNearby'/'statusChange' have no corresponding enum
+  // value yet, so they stay unmapped (default-on) until that type exists.
+  const typeMap: Record<string, keyof NotificationPrefsView> = {
+    'review': 'reviewReply',
+    'system': 'announcements',
+  }
+  const key = typeMap[type]
+  return key ? prefs[key] : true
+}
+
+function shouldSendPush(prefs: NotificationPrefsView, type: string): boolean {
   // Always send push for important notifications
-  return !['review_reply'].includes(type) || prefs.reviewReply
+  return !['review'].includes(type) || prefs.reviewReply
 }
 
 function isDuplicate(dedupKey: string): boolean {

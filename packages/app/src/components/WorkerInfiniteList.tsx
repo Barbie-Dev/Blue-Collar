@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2, ArrowUp } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 import WorkerCard from "@/components/WorkerCard";
 import EmptyState from "@/components/EmptyState";
+import LoadingState from "@/components/LoadingState";
+import ErrorState from "@/components/ErrorState";
 import type { Worker, Meta } from "@/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
@@ -101,12 +103,7 @@ export default function WorkerInfiniteList({ initialWorkers, initialMeta, params
 
       {/* Sentinel + loading indicator */}
       <div ref={sentinelRef} className="mt-8 flex justify-center">
-        {loading && (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <Loader2 size={18} className="animate-spin" />
-            Loading more workers…
-          </div>
-        )}
+        {loading && <LoadingState variant="inline" message="Loading more workers…" />}
         {!loading && !hasMore && workers.length > 0 && (
           <p className="text-sm text-gray-400">You've seen all workers</p>
         )}
@@ -114,12 +111,7 @@ export default function WorkerInfiniteList({ initialWorkers, initialMeta, params
 
       {/* Error state */}
       {error && (
-        <div className="mt-4 rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-600">
-          {error}{" "}
-          <button onClick={loadMore} className="underline hover:no-underline">
-            Try again
-          </button>
-        </div>
+        <ErrorState variant="inline" message={error} onRetry={loadMore} className="mt-4 justify-center" />
       )}
 
       {/* Back to top */}

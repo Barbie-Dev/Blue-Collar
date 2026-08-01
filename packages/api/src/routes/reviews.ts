@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
-import { db } from '../db.js'
+import { authenticate, authorize } from '../middleware/auth.js'
+import { handleError } from '../utils/handleError.js'
 import {
   listReviews,
   createReview,
@@ -7,6 +8,7 @@ import {
   getModerationQueue,
   moderateReview,
 } from '../controllers/reviews.js'
+import { createReview as createReviewForWorker } from '../services/review.service.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { catchAsync } from '../utils/catchAsync.js'
 
@@ -36,16 +38,38 @@ export async function listWorkerReviews(req: Request, res: Response) {
   })
 }
 
+export const createWorkerReview = catchAsync(async (req: Request, res: Response) => {
+  const workerId = req.params.id ?? req.params.workerId
+  const { rating, comment, transactionHash } = req.body
+  const review = await createReviewForWorker(workerId, req.user!.id, rating, comment, transactionHash)
+  return res.status(201).json({
+    data: review,
+    status: 'success',
+    message: 'Review created (pending moderation)',
+    code: 201,
+  })
+})
+
 export async function deleteReview(req: Request, res: Response) {
   const review = await db.review.findUnique({ where: { id: req.params.id } })
   if (!review) return res.status(404).json({ status: 'error', message: 'Not found', code: 404 })
   if (review.authorId !== req.user!.id) {
     return res.status(403).json({ status: 'error', message: 'Forbidden', code: 403 })
   }
+})
 
-  await db.review.delete({ where: { id: req.params.id } })
-  return res.status(204).send()
-}
+/**
+ * PATCH /api/workers/:workerId/reviews/:id/flag
+ * Flag a review for moderation.
+ */
+router.patch('/:id/flag', authenticate, async (req: Request, res: Response) => {
+  try {
+    const updated = await flagReview(req.params.id, req.body.reason)
+    return res.json({ data: updated, status: 'success', code: 200 })
+  } catch (err) {
+    return handleError(res, err)
+  }
+})
 
 router.get('/', listReviews)
 router.post('/', authenticate, createReview)

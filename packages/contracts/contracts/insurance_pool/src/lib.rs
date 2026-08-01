@@ -13,6 +13,9 @@ use soroban_sdk::{
 /// Maximum allowed premium: 10000 bps = 100%.
 pub const MAX_PREMIUM_BPS: u32 = 10000;
 
+/// Event schema version — bump when adding/removing/renaming events.
+pub const VERSION: u32 = 1;
+
 // =============================================================================
 // Roles
 // =============================================================================
@@ -451,6 +454,11 @@ impl InsurancePoolContract {
 
         env.events()
             .publish((symbol_short!("Rebal"), token, new_premium_bps as i128), ());
+    }
+
+    /// Return the event schema version.
+    pub fn version(_env: Env) -> u32 {
+        VERSION
     }
 
     /// Upgrade contract WASM.

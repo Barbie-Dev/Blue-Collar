@@ -113,7 +113,7 @@ pnpm docker:up
 # Run database migrations
 cd packages/api && pnpm migrate && cd ../..
 
-# Seed the database with default categories
+# Seed the database with demo-ready data (categories, curators, workers)
 cd packages/api && pnpm seed && cd ../..
 
 # Stop and remove containers (data volumes are preserved)
@@ -156,8 +156,10 @@ docker compose up -d db redis
 cd packages/api
 pnpm prisma:generate   # generates Prisma client from schema
 pnpm migrate           # runs prisma migrate dev
-pnpm seed              # seeds default categories
+pnpm seed              # seeds categories + admin + curators + 20 workers
 ```
+
+See [Seeding the database](#seeding-the-database) for all available seed commands.
 
 **3. Start the API**
 
@@ -520,3 +522,71 @@ PRs are squash-merged. The CI pipeline runs tests, build, and lint automatically
 ---
 
 For questions, join the [Telegram community](https://t.me/bluecollar) or open a [GitHub Discussion](https://github.com/Fidelis900/Blue-Collar/discussions).
+
+
+---
+
+## Seeding the database
+
+### What gets seeded
+
+Running `pnpm seed` creates:
+
+| Entity | Count | Details |
+|--------|-------|---------|
+| Categories | 10 | Plumber, Electrician, Carpenter, Welder, Mason, Painter, Roofer, HVAC, Landscaper, General Contractor |
+| Admin user | 1 | `admin@bluecollar.dev` |
+| Curator users | 3 | `curator1–3@bluecollar.dev` |
+| Workers | 20 | 2 per category, assigned round-robin to curators |
+
+### Available commands
+
+```bash
+cd packages/api
+
+# Basic seed — idempotent, safe to re-run
+pnpm seed
+
+# Full seed including sample reviews
+pnpm seed:reviews
+
+# Wipe everything and re-seed (dev only — not allowed in production)
+pnpm seed:reset
+
+# Staging seed — realistic fake data using faker.js (~15 workers, 30+ reviews)
+NODE_ENV=staging pnpm seed:staging
+```
+
+### Default credentials (development only)
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `admin@bluecollar.dev` | `Admin1234!` |
+| Curator | `curator1@bluecollar.dev` | `Curator1234!` |
+| Curator | `curator2@bluecollar.dev` | `Curator1234!` |
+| Curator | `curator3@bluecollar.dev` | `Curator1234!` |
+
+> **Production note:** dev passwords are only used when `NODE_ENV !== 'production'`.  
+> In production or CI, set `SEED_ADMIN_PASSWORD`, `SEED_CURATOR1_PASSWORD`, etc. via environment variables — the script will throw if they are missing.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SEED_ADMIN_EMAIL` | `admin@bluecollar.dev` | Admin account email |
+| `SEED_ADMIN_PASSWORD` | `Admin1234!` (dev only) | Admin password |
+| `SEED_CURATOR1_EMAIL` | `curator1@bluecollar.dev` | Curator 1 email |
+| `SEED_CURATOR1_PASSWORD` | `Curator1234!` (dev only) | Curator 1 password |
+| `SEED_CURATOR2_EMAIL` | `curator2@bluecollar.dev` | Curator 2 email |
+| `SEED_CURATOR2_PASSWORD` | `Curator1234!` (dev only) | Curator 2 password |
+| `SEED_CURATOR3_EMAIL` | `curator3@bluecollar.dev` | Curator 3 email |
+| `SEED_CURATOR3_PASSWORD` | `Curator1234!` (dev only) | Curator 3 password |
+
+### Idempotency
+
+The seed is safe to run multiple times:
+
+- Categories are inserted with `skipDuplicates: true`.
+- Users are upserted by email — re-running leaves passwords unchanged.
+- Workers are skipped if a row with the same `email` already exists.
+- Reviews are skipped if an identical `(workerId, authorId)` pair exists.
