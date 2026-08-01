@@ -22,6 +22,10 @@ coverage/
 playwright-report/
 test-results/
 
+# k6 load test results
+load-results/
+performance-results/
+
 # Build artifacts
 *.tsbuildinfo
 build/

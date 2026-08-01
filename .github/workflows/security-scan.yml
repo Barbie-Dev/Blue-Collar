@@ -31,19 +31,35 @@ jobs:
         with:
           fetch-depth: 0  # full history required for diff-based scanning
 
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      - name: Install Gitleaks
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks-linux-amd64 -o /tmp/gitleaks
+          chmod +x /tmp/gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/
+          gitleaks version
+
+      - name: Run Gitleaks
+        run: |
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --report-format sarif \
+            --output gitleaks-results.sarif \
+            --exit-code 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "true"
-          # Allowlist file: .gitleaks.toml (add project-specific FPs there)
+
+      - name: Upload Gitleaks SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-results.sarif
 
       - name: TruffleHog OSS
         uses: trufflesecurity/trufflehog@v3.88.27
         with:
-          extra_args: >
-            --only-verified
-            --fail
+          # The action includes --fail by default; do not pass it in extra_args
+          extra_args: --only-verified
 
   # ---------------------------------------------------------------------------
   # Dependency audit — npm (pnpm) and Rust (cargo)
