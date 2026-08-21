@@ -5,7 +5,21 @@
 import { escrowRepository as defaultEscrowRepository } from '../repositories/escrow.repository.js'
 import { AppError, ErrorCode } from '../utils/AppError.js'
 import { dispatchNotification } from './notification.service.js'
+import { db } from '../db.js'
 import type { EscrowServiceDeps } from '../container/types.js'
+
+// ── Pause guard ───────────────────────────────────────────────────────────────
+
+/**
+ * Check whether the system is globally paused.
+ * Throws 409 Conflict if paused, mirroring the on-chain `require_not_paused`.
+ */
+async function requireNotPaused() {
+  const config = await db.systemConfig.findUnique({ where: { key: 'isPaused' } } as any)
+  if (config && (config as any).value === 'true') {
+    throw new AppError('System is paused — escrow operations are temporarily disabled', 409, true, ErrorCode.CONFLICT)
+  }
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +46,7 @@ export function createEscrowService(deps: EscrowServiceDeps) {
       expiresAt: Date
       txId?: string
     }) {
+      await requireNotPaused()
       if (data.amountXlm <= 0) throw new AppError('amountXlm must be greater than 0', 400, true, ErrorCode.VALIDATION_ERROR)
       if (data.expiresAt <= new Date()) throw new AppError('expiresAt must be in the future', 400, true, ErrorCode.VALIDATION_ERROR)
       if (data.payerId === data.payeeId) throw new AppError('Payer and payee must be different', 400, true, ErrorCode.VALIDATION_ERROR)
@@ -238,4 +253,45 @@ export async function resolveEscrowDispute(
   resolution?: string,
 ) {
   return _defaultService.resolveEscrowDispute(disputeId, adminId, status, resolution)
+}
+
+/**
+ * Resolve a disputed escrow directly.
+ * Guards against the system-paused bypass regression (#1028).
+ *
+ * @param escrowId  - the escrow record to resolve
+ * @param outcome   - 'release' | 'cancel' — what happens to the funds
+ * @param callerId  - the user requesting the resolution (must be admin)
+ * @param callerRole - must be 'admin'
+ */
+export async function resolveDispute(
+  escrowId: string,
+  outcome: 'release' | 'cancel',
+  callerId: string,
+  callerRole: string,
+) {
+  await requireNotPaused()
+
+  const record = await db.escrowRecord.findUnique({ where: { id: escrowId } } as any)
+  if (!record) throw new AppError('Escrow not found', 404, true, ErrorCode.NOT_FOUND)
+  if (callerRole !== 'admin') throw new AppError('Forbidden', 403, true, ErrorCode.FORBIDDEN)
+
+  const newStatus = outcome === 'release' ? 'released' : 'cancelled'
+  const updated = await db.escrowRecord.update({
+    where: { id: escrowId },
+    data: {
+      status: newStatus,
+      ...(newStatus === 'released' ? { releasedAt: new Date() } : { cancelledAt: new Date() }),
+    },
+  } as any)
+
+  notifyBoth(
+    (record as any).payerId,
+    (record as any).payeeId,
+    `Escrow dispute resolved`,
+    `The dispute on escrow ${escrowId} has been resolved. Outcome: ${outcome}.`,
+    `/escrow/${escrowId}`,
+  )
+
+  return updated
 }
