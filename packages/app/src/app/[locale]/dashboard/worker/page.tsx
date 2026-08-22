@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Area,
@@ -19,8 +19,8 @@ import { Download, Eye, Loader2, Star, TrendingUp, Wallet } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { DashboardTableSkeleton } from "@/components/Skeleton";
 import { cn } from "@/lib/utils";
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
+import { useMyWorkers, useWorkerPersonalDashboard } from "@/hooks/queries";
+import { exportWorkerPersonalAnalyticsCsv } from "@/lib/api";
 
 type DatePreset = "7" | "30" | "90" | "custom";
 
@@ -29,43 +29,6 @@ type DashboardWorker = {
   name: string;
   isActive: boolean;
   category: { id: string; name: string };
-};
-
-type SeriesPoint = {
-  date: string;
-  views: number;
-  uniqueViews: number;
-  tips: number;
-  tipCount: number;
-  avgRating: number | null;
-  reviewCount: number;
-  earnings: number;
-};
-
-type PersonalAnalytics = {
-  worker: { id: string; name: string; category: string; walletAddress?: string | null };
-  range: { startDate: string; endDate: string };
-  summary: {
-    totalViews: number;
-    uniqueViews: number;
-    tipsReceived: number;
-    tipCount: number;
-    avgRating: number;
-    reviewCount: number;
-    earnings: number;
-    contacts: number;
-  };
-  deltas: {
-    totalViews: number;
-    uniqueViews: number;
-    tipsReceived: number;
-    avgRating: number;
-    earnings: number;
-  };
-  charts: {
-    series: SeriesPoint[];
-    ratingDistribution: Array<{ rating: number; count: number }>;
-  };
 };
 
 function dateDaysAgo(days: number) {
@@ -87,16 +50,12 @@ function formatXlm(value: number) {
 }
 
 export default function WorkerPersonalDashboardPage() {
-  const { user, token, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const [workers, setWorkers] = useState<DashboardWorker[]>([]);
   const [selectedWorkerId, setSelectedWorkerId] = useState("");
   const [preset, setPreset] = useState<DatePreset>("30");
   const [startDate, setStartDate] = useState(dateDaysAgo(30));
   const [endDate, setEndDate] = useState(today());
-  const [data, setData] = useState<PersonalAnalytics | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!user || (user.role !== "curator" && user.role !== "admin"))) {
@@ -104,57 +63,17 @@ export default function WorkerPersonalDashboardPage() {
     }
   }, [user, authLoading, router]);
 
-  const rangeParams = useMemo(() => {
-    const params = new URLSearchParams({ startDate, endDate });
-    return params.toString();
-  }, [startDate, endDate]);
-
-  const loadWorkers = useCallback(async () => {
-    if (!token) return;
-    const res = await fetch(`${API}/workers/mine?limit=100`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error("Failed to load your workers");
-    const json = await res.json();
-    const rows = json.data ?? [];
-    setWorkers(rows);
-    if (!selectedWorkerId && rows[0]?.id) setSelectedWorkerId(rows[0].id);
-  }, [token, selectedWorkerId]);
-
-  const loadAnalytics = useCallback(async () => {
-    if (!token || !selectedWorkerId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API}/workers/${selectedWorkerId}/analytics/dashboard?${rangeParams}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.message ?? "Failed to load worker analytics");
-      }
-      const json = await res.json();
-      setData(json.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load worker analytics");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, selectedWorkerId, rangeParams]);
+  const workersQuery = useMyWorkers({ limit: "100" });
+  const workers = (workersQuery.data?.data ?? []) as DashboardWorker[];
 
   useEffect(() => {
-    if (!authLoading && token) {
-      loadWorkers().catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load your workers");
-        setLoading(false);
-      });
-    }
-  }, [authLoading, token, loadWorkers]);
+    if (!selectedWorkerId && workers[0]?.id) setSelectedWorkerId(workers[0].id);
+  }, [workers, selectedWorkerId]);
 
-  useEffect(() => {
-    if (selectedWorkerId) loadAnalytics();
-  }, [selectedWorkerId, loadAnalytics]);
+  const analyticsQuery = useWorkerPersonalDashboard(selectedWorkerId, { startDate, endDate });
+  const data = analyticsQuery.data?.data ?? null;
+  const loading = workersQuery.isLoading || analyticsQuery.isLoading;
+  const error = analyticsQuery.isError ? "Failed to load worker analytics" : null;
 
   const applyPreset = (nextPreset: DatePreset) => {
     setPreset(nextPreset);
@@ -166,8 +85,8 @@ export default function WorkerPersonalDashboardPage() {
   };
 
   const exportCsv = () => {
-    if (!selectedWorkerId || !token) return;
-    window.open(`${API}/workers/${selectedWorkerId}/analytics/export?${rangeParams}`, "_blank");
+    if (!selectedWorkerId) return;
+    window.open(exportWorkerPersonalAnalyticsCsv(selectedWorkerId, { startDate, endDate }), "_blank");
   };
 
   if (authLoading || (!user && !authLoading)) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -28,7 +28,13 @@ import { useWallet } from "@/hooks/useWallet";
 import { cn } from "@/lib/utils";
 import FriendbotBanner from "@/components/FriendbotBanner";
 import { DashboardTableSkeleton } from "@/components/Skeleton";
-import type { CuratorAnalytics, ViewTrend } from "@/types";
+import {
+  useMyWorkers,
+  useCuratorAnalytics,
+  useWorkerViewTrends,
+  useToggleWorker,
+  useDeleteWorker,
+} from "@/hooks/queries";
 
 // ── Dynamic imports (code splitting: recharts is ~200KB) ─────────────────────
 const CuratorCharts = dynamic(
@@ -53,22 +59,33 @@ export default function DashboardPage() {
   const { publicKey } = useWallet();
   const router = useRouter();
 
-  const [workers, setWorkers] = useState<DashboardWorker[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [xlmBalance, setXlmBalance] = useState<number | null>(null);
 
-  // Analytics state
-  const [analytics, setAnalytics] = useState<CuratorAnalytics | null>(null);
-  const [analyticsLoading, setAnalyticsLoading] = useState(true);
-  const [selectedWorkerTrends, setSelectedWorkerTrends] = useState<ViewTrend[] | null>(null);
+  const workersQuery = useMyWorkers();
+  const workers = (workersQuery.data?.data ?? []) as DashboardWorker[];
+  const loading = workersQuery.isLoading;
+  const error = workersQuery.isError
+    ? workersQuery.error instanceof Error
+      ? workersQuery.error.message
+      : "Failed to load workers"
+    : null;
+
+  const analyticsQuery = useCuratorAnalytics();
+  const analytics = analyticsQuery.data?.data ?? null;
+  const analyticsLoading = analyticsQuery.isLoading;
+
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [selectedWorkerName, setSelectedWorkerName] = useState<string>("");
-  const [trendsLoading, setTrendsLoading] = useState(false);
+  const trendsQuery = useWorkerViewTrends(selectedWorkerId ?? "", 30);
+  const selectedWorkerTrends = selectedWorkerId ? (trendsQuery.data?.data ?? null) : null;
+  const trendsLoading = trendsQuery.isLoading;
+
   const [activeTab, setActiveTab] = useState<"workers" | "analytics">("workers");
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<DashboardWorker | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const toggleWorker = useToggleWorker();
+  const deleteWorker = useDeleteWorker();
 
   useEffect(() => {
     if (!authLoading && (!user || (user.role !== "curator" && user.role !== "admin"))) {
@@ -76,65 +93,10 @@ export default function DashboardPage() {
     }
   }, [user, authLoading, router]);
 
-  const fetchWorkers = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API}/workers/mine`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to load workers");
-      const json = await res.json();
-      setWorkers(json.data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  const fetchAnalytics = useCallback(async () => {
-    if (!token) return;
-    setAnalyticsLoading(true);
-    try {
-      const res = await fetch(`${API}/analytics/curator`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to load analytics");
-      const json = await res.json();
-      setAnalytics(json.data);
-    } catch {
-      // analytics is supplementary — don't block the page
-    } finally {
-      setAnalyticsLoading(false);
-    }
-  }, [token]);
-
-  const fetchWorkerTrends = async (workerId: string, workerName: string) => {
-    if (!token) return;
-    setTrendsLoading(true);
+  const fetchWorkerTrends = (workerId: string, workerName: string) => {
+    setSelectedWorkerId(workerId);
     setSelectedWorkerName(workerName);
-    try {
-      const res = await fetch(`${API}/workers/${workerId}/analytics/trends?days=30`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to load trends");
-      const json = await res.json();
-      setSelectedWorkerTrends(json.data);
-    } catch {
-      setSelectedWorkerTrends(null);
-    } finally {
-      setTrendsLoading(false);
-    }
   };
-
-  useEffect(() => {
-    if (!authLoading && token) {
-      fetchWorkers();
-      fetchAnalytics();
-    }
-  }, [authLoading, token, fetchWorkers, fetchAnalytics]);
 
   useEffect(() => {
     if (!IS_STELLAR_TESTNET || !publicKey) {
@@ -157,44 +119,16 @@ export default function DashboardPage() {
       .catch(() => setXlmBalance(null));
   }, [publicKey]);
 
-  // ── Toggle active/inactive (optimistic) ──────────────────────────────────
-  const handleToggle = async (worker: DashboardWorker) => {
-    setWorkers((prev: DashboardWorker[]) =>
-      prev.map((w: DashboardWorker) => (w.id === worker.id ? { ...w, isActive: !w.isActive } : w))
-    );
-    try {
-      const res = await fetch(`${API}/workers/${worker.id}/toggle`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Toggle failed");
-    } catch {
-      setWorkers((prev: DashboardWorker[]) =>
-        prev.map((w: DashboardWorker) => (w.id === worker.id ? { ...w, isActive: worker.isActive } : w))
-      );
-    }
+  // ── Toggle active/inactive (optimistic, via useMutation) ─────────────────
+  const handleToggle = (worker: DashboardWorker) => {
+    toggleWorker.mutate(worker.id);
   };
 
-  // ── Delete (optimistic) ───────────────────────────────────────────────────
-  const handleDelete = async () => {
+  // ── Delete (optimistic, via useMutation) ──────────────────────────────────
+  const handleDelete = () => {
     if (!deleteTarget) return;
-    const target = deleteTarget;
-    setDeleting(true);
-
-    setWorkers((prev: DashboardWorker[]) => prev.filter((w: DashboardWorker) => w.id !== target.id));
+    deleteWorker.mutate(deleteTarget.id);
     setDeleteTarget(null);
-
-    try {
-      const res = await fetch(`${API}/workers/${target.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Delete failed");
-    } catch {
-      setWorkers((prev: DashboardWorker[]) => [target, ...prev]);
-    } finally {
-      setDeleting(false);
-    }
   };
 
   const handleExportCsv = () => {
@@ -396,7 +330,7 @@ export default function DashboardPage() {
                   Views — {selectedWorkerName} (Last 30 days)
                 </h3>
                 <button
-                  onClick={() => setSelectedWorkerTrends(null)}
+                  onClick={() => setSelectedWorkerId(null)}
                   className="rounded-md p-1 text-gray-400 hover:text-gray-600"
                 >
                   <X size={16} />
@@ -575,10 +509,10 @@ export default function DashboardPage() {
               </Dialog.Close>
               <button
                 onClick={handleDelete}
-                disabled={deleting}
+                disabled={deleteWorker.isPending}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60 transition-colors"
               >
-                {deleting && <Loader2 size={14} className="animate-spin" />}
+                {deleteWorker.isPending && <Loader2 size={14} className="animate-spin" />}
                 Delete
               </button>
             </div>
