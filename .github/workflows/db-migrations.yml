@@ -64,20 +64,29 @@ jobs:
           DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
 
       - name: Validate schema matches database
-        run: npx prisma db validate
+        run: npx prisma validate
         working-directory: packages/api
         env:
           DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+
+      # `migrate diff --from-migrations` replays the migration history into a
+      # throwaway database, so it needs one that already exists.
+      - name: Create shadow database
+        run: |
+          PGPASSWORD=bluecollar psql -h localhost -U bluecollar -d postgres \
+            -c 'CREATE DATABASE "bluecollar_shadow";'
 
       - name: Detect drift (diff migrations vs schema)
         run: |
           npx prisma migrate diff \
             --from-migrations ./prisma/migrations \
             --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
             --exit-code
         working-directory: packages/api
         env:
           DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar
+          SHADOW_DATABASE_URL: postgresql://bluecollar:bluecollar@localhost:5432/bluecollar_shadow
 
       - name: Run seed script
         run: npx tsx src/database/seed.ts
