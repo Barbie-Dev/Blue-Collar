@@ -1,35 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-
-interface ProtocolMetrics {
-  timestamp: string
-  totalRegistrations: number
-  activeWorkers: number
-  totalTipVolume: number
-  totalTipCount: number
-  totalEscrowVolume: number
-  activeEscrows: number
-  totalDisputes: number
-  resolvedDisputes: number
-  dataFreshness: string
-}
+import { useProtocolMetrics } from '@/hooks/queries'
 
 export default function StatsPage() {
-  const [metrics, setMetrics] = useState<ProtocolMetrics | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/analytics/metrics')
-      .then((res) => res.json())
-      .then((data) => {
-        setMetrics(data.data)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
+  const { data: metrics, isLoading: loading } = useProtocolMetrics()
 
   if (loading) {
     return (
