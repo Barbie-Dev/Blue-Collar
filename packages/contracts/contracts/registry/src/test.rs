@@ -5,15 +5,14 @@
 //! that together give a contract administrator confidence that an upgrade
 //! preserves data and behavior:
 //!
-//! 1. [`state_migration`]      — `migrate` preserves all stored data and
-//!                               advances the schema version correctly.
-//! 2. [`backward_compat`]      — storage written by the old code is still
-//!                               readable, and entry points keep their shapes.
-//! 3. [`perf_regression`]      — core operations stay within a CPU/memory
-//!                               budget, so an upgrade cannot silently regress
-//!                               gas cost.
-//! 4. [`security_regression`]  — upgrade/migration entry points keep enforcing
-//!                               their authorization and timelock guards.
+//! 1. [`state_migration`] — `migrate` preserves all stored data and advances the
+//!    schema version correctly.
+//! 2. [`backward_compat`] — storage written by the old code is still readable, and
+//!    entry points keep their shapes.
+//! 3. [`perf_regression`] — core operations stay within a CPU/memory budget, so an
+//!    upgrade cannot silently regress gas cost.
+//! 4. [`security_regression`] — upgrade/migration entry points keep enforcing their
+//!    authorization and timelock guards.
 //!
 //! A real WASM-swap upgrade (uploading new bytecode and calling `upgrade`) is
 //! exercised separately in the `wasm-upgrade-tests` feature build and by the
@@ -24,9 +23,7 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
-    token::StellarAssetClient,
-    Address, BytesN, Env, String, Symbol, Vec,
+    testutils::Address as _, token::StellarAssetClient, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 // ===========================================================================
@@ -53,7 +50,10 @@ mod reputation_system {
         let w = f.client().get_worker(&id).unwrap();
         assert_eq!(w.avg_rating, 8_000);
         assert_eq!(w.review_count, 1);
-        assert!(w.reputation > 0, "reputation should be non-zero after review");
+        assert!(
+            w.reputation > 0,
+            "reputation should be non-zero after review"
+        );
     }
 
     #[test]
@@ -167,7 +167,10 @@ mod reputation_system {
 
         f.client().submit_review(&reviewer, &id, &8_000);
         let history = f.client().get_reputation_history(&id);
-        assert!(history.len() >= 1, "history should have at least one entry");
+        assert!(
+            !history.is_empty(),
+            "history should have at least one entry"
+        );
 
         let entry = history.get(history.len() - 1).unwrap();
         assert_eq!(entry.previous_score, 0);
@@ -192,7 +195,7 @@ mod reputation_system {
 
         f.client().record_job_completion(&f.admin, &id);
         let history = f.client().get_reputation_history(&id);
-        assert!(history.len() >= 1);
+        assert!(!history.is_empty());
     }
 
     #[test]
@@ -213,7 +216,9 @@ mod reputation_system {
         assert!(w.avg_rating < 3_000);
         // reputation should have been halved from the auto-slash
         let history = f.client().get_reputation_history(&id);
-        let has_slash = history.iter().any(|e| e.reason == Symbol::new(&f.env, "slash"));
+        let has_slash = history
+            .iter()
+            .any(|e| e.reason == Symbol::new(&f.env, "slash"));
         assert!(has_slash, "expected a slash event in history");
     }
 
@@ -259,10 +264,16 @@ impl UpgradeFixture {
         client.grant_role(&admin, &Symbol::new(&env, ROLE_REP_MGR), &admin);
         client.grant_role(&admin, &Symbol::new(&env, ROLE_UPGRADER), &admin);
 
-        UpgradeFixture { env, contract, admin, curator, owner }
+        UpgradeFixture {
+            env,
+            contract,
+            admin,
+            curator,
+            owner,
+        }
     }
 
-    fn client(&self) -> RegistryContractClient {
+    fn client(&self) -> RegistryContractClient<'_> {
         RegistryContractClient::new(&self.env, &self.contract)
     }
 
@@ -404,8 +415,9 @@ mod backward_compat {
         let hash = BytesN::from_array(&f.env, &[1u8; 32]);
 
         // migrate(admin, expected_version)
-        let _migrate: fn(&RegistryContractClient, &Address, &u32) =
-            |c, a, v| { c.migrate(a, v); };
+        let _migrate: fn(&RegistryContractClient, &Address, &u32) = |c, a, v| {
+            c.migrate(a, v);
+        };
         // propose_upgrade(admin, wasm_hash) / get_pending_upgrade()
         f.client().propose_upgrade(&f.admin, &hash);
         let pending = f.client().get_pending_upgrade().unwrap();
@@ -656,12 +668,8 @@ mod verification_levels {
         let f = setup();
         let id = f.register("w1");
         let stranger = Address::generate(&f.env);
-        f.client().add_certified_skill(
-            &stranger,
-            &id,
-            &Symbol::new(&f.env, "skill_a"),
-            &0,
-        );
+        f.client()
+            .add_certified_skill(&stranger, &id, &Symbol::new(&f.env, "skill_a"), &0);
     }
 
     #[test]
@@ -681,11 +689,8 @@ mod verification_levels {
     fn revoke_nonexistent_skill_panics() {
         let f = setup();
         let id = f.register("w1");
-        f.client().revoke_certified_skill(
-            &f.admin,
-            &id,
-            &Symbol::new(&f.env, "nonexistent"),
-        );
+        f.client()
+            .revoke_certified_skill(&f.admin, &id, &Symbol::new(&f.env, "nonexistent"));
     }
 
     #[test]
@@ -710,7 +715,8 @@ mod auth_failures {
     fn grant_role_requires_admin() {
         let f = UpgradeFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().grant_role(&f.owner, &role, &Address::generate(&f.env));
+        f.client()
+            .grant_role(&f.owner, &role, &Address::generate(&f.env));
     }
 
     #[test]
@@ -743,7 +749,8 @@ mod auth_failures {
     #[should_panic(expected = "Missing role")]
     fn add_curator_requires_curator_mgr() {
         let f = UpgradeFixture::new();
-        f.client().add_curator(&f.curator, &Address::generate(&f.env));
+        f.client()
+            .add_curator(&f.curator, &Address::generate(&f.env));
     }
 
     #[test]
@@ -767,7 +774,7 @@ mod auth_failures {
             &Symbol::new(&f.env, "plumber"),
             &f.zero_hash(),
             &f.zero_hash(),
-            &f.owner,  // owner is not a curator
+            &f.owner, // owner is not a curator
         );
     }
 
@@ -864,14 +871,16 @@ mod auth_failures {
     #[should_panic(expected = "Missing role")]
     fn add_category_requires_admin() {
         let f = UpgradeFixture::new();
-        f.client().add_category(&f.curator, &Symbol::new(&f.env, "electrician"));
+        f.client()
+            .add_category(&f.curator, &Symbol::new(&f.env, "electrician"));
     }
 
     #[test]
     #[should_panic(expected = "Missing role")]
     fn remove_category_requires_admin() {
         let f = UpgradeFixture::new();
-        f.client().remove_category(&f.curator, &Symbol::new(&f.env, "plumber"));
+        f.client()
+            .remove_category(&f.curator, &Symbol::new(&f.env, "plumber"));
     }
 
     // -- Upgrade auth failures --

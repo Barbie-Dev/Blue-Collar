@@ -14,7 +14,6 @@ struct AuthFixture {
     admin: Address,
     pauser: Address,
     fee_mgr: Address,
-    upgrader: Address,
     stranger: Address,
     token: Address,
     recipient_a: Address,
@@ -48,19 +47,35 @@ impl AuthFixture {
         client.grant_role(&admin, &Symbol::new(&env, ROLE_UPGRADER), &upgrader);
 
         // Set fee recipient for distribution tests
-        let recipients = Vec::from_array(&env, [
-            FeeRecipient { address: recipient_a.clone(), percentage_bps: 6_000 },
-            FeeRecipient { address: recipient_b.clone(), percentage_bps: 4_000 },
-        ]);
+        let recipients = Vec::from_array(
+            &env,
+            [
+                FeeRecipient {
+                    address: recipient_a.clone(),
+                    percentage_bps: 6_000,
+                },
+                FeeRecipient {
+                    address: recipient_b.clone(),
+                    percentage_bps: 4_000,
+                },
+            ],
+        );
         client.set_fee_recipients(&fee_mgr, &recipients);
 
         AuthFixture {
-            env, contract, admin, pauser, fee_mgr, upgrader, stranger,
-            token, recipient_a, recipient_b,
+            env,
+            contract,
+            admin,
+            pauser,
+            fee_mgr,
+            stranger,
+            token,
+            recipient_a,
+            recipient_b,
         }
     }
 
-    fn client(&self) -> FeeDistributionContractClient {
+    fn client(&self) -> FeeDistributionContractClient<'_> {
         FeeDistributionContractClient::new(&self.env, &self.contract)
     }
 
@@ -68,7 +83,8 @@ impl AuthFixture {
         let token_client = TokenClient::new(&self.env, &self.token);
         let admin_signer = self.admin.clone();
         token_client.approve(&admin_signer, &self.contract, &100_000, &200_000);
-        self.client().collect_fees(&self.admin, &self.token, &100_000);
+        self.client()
+            .collect_fees(&self.admin, &self.token, &100_000);
     }
 }
 
@@ -84,7 +100,8 @@ mod auth_failures {
     fn grant_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().grant_role(&f.stranger, &role, &Address::generate(&f.env));
+        f.client()
+            .grant_role(&f.stranger, &role, &Address::generate(&f.env));
     }
 
     #[test]
@@ -155,7 +172,8 @@ mod paused_state {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().grant_role(&f.admin, &role, &Address::generate(&f.env));
+        f.client()
+            .grant_role(&f.admin, &role, &Address::generate(&f.env));
     }
 
     #[test]
@@ -219,10 +237,19 @@ mod boundary {
     #[should_panic(expected = "Percentages must sum to 100%")]
     fn set_recipients_total_under_100() {
         let f = AuthFixture::new();
-        let recipients = Vec::from_array(&f.env, [
-            FeeRecipient { address: f.recipient_a.clone(), percentage_bps: 3_000 },
-            FeeRecipient { address: f.recipient_b.clone(), percentage_bps: 3_000 },
-        ]);
+        let recipients = Vec::from_array(
+            &f.env,
+            [
+                FeeRecipient {
+                    address: f.recipient_a.clone(),
+                    percentage_bps: 3_000,
+                },
+                FeeRecipient {
+                    address: f.recipient_b.clone(),
+                    percentage_bps: 3_000,
+                },
+            ],
+        );
         f.client().set_fee_recipients(&f.fee_mgr, &recipients);
     }
 
@@ -230,10 +257,19 @@ mod boundary {
     #[should_panic(expected = "Percentages must sum to 100%")]
     fn set_recipients_total_over_100() {
         let f = AuthFixture::new();
-        let recipients = Vec::from_array(&f.env, [
-            FeeRecipient { address: f.recipient_a.clone(), percentage_bps: 6_000 },
-            FeeRecipient { address: f.recipient_b.clone(), percentage_bps: 5_000 },
-        ]);
+        let recipients = Vec::from_array(
+            &f.env,
+            [
+                FeeRecipient {
+                    address: f.recipient_a.clone(),
+                    percentage_bps: 6_000,
+                },
+                FeeRecipient {
+                    address: f.recipient_b.clone(),
+                    percentage_bps: 5_000,
+                },
+            ],
+        );
         f.client().set_fee_recipients(&f.fee_mgr, &recipients);
     }
 
@@ -267,9 +303,13 @@ mod boundary {
     #[test]
     fn set_recipients_single_recipient_100_percent() {
         let f = AuthFixture::new();
-        let recipients = Vec::from_array(&f.env, [
-            FeeRecipient { address: f.recipient_a.clone(), percentage_bps: 10_000 },
-        ]);
+        let recipients = Vec::from_array(
+            &f.env,
+            [FeeRecipient {
+                address: f.recipient_a.clone(),
+                percentage_bps: 10_000,
+            }],
+        );
         f.client().set_fee_recipients(&f.fee_mgr, &recipients);
         let stored = f.client().get_fee_recipients();
         assert_eq!(stored.len(), 1);

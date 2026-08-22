@@ -4,7 +4,7 @@
 //! All functions follow the Checks → Effects → Interactions (CEI) pattern.
 //! Token transfers (Interactions) only happen after storage is updated (Effects).
 
-use soroban_sdk::{symbol_short, token, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{symbol_short, token, Address, Env, Symbol, Vec};
 
 use crate::storage::{
     self, load_escrow, load_escrow_list, load_role_members, save_escrow, save_escrow_list,
@@ -114,7 +114,10 @@ pub fn do_create(
     require_not_paused(env);
     depositor.require_auth();
     assert!(amount > 0, "amount must be positive");
-    assert!(expiry > env.ledger().timestamp(), "expiry must be in future");
+    assert!(
+        expiry > env.ledger().timestamp(),
+        "expiry must be in future"
+    );
     assert!(load_escrow(env, &id).is_none(), "Escrow already exists");
 
     // --- Effects ---
@@ -137,7 +140,7 @@ pub fn do_create(
 
     // --- Interactions ---
     let token = token::Client::new(env, &token_addr);
-    token.transfer(depositor, &env.current_contract_address(), &amount);
+    token.transfer(depositor, env.current_contract_address(), &amount);
 
     env.events().publish(
         (symbol_short!("Created"), id),
@@ -174,7 +177,11 @@ pub fn do_release(env: &Env, caller: &Address, id: Symbol) {
 
     // --- Interactions ---
     let token = token::Client::new(env, &record.token);
-    token.transfer(&env.current_contract_address(), &record.beneficiary, &record.amount);
+    token.transfer(
+        &env.current_contract_address(),
+        &record.beneficiary,
+        &record.amount,
+    );
 
     env.events().publish(
         (symbol_short!("Released"), id),
@@ -212,7 +219,11 @@ pub fn do_cancel(env: &Env, caller: &Address, id: Symbol) {
 
     // --- Interactions ---
     let token = token::Client::new(env, &record.token);
-    token.transfer(&env.current_contract_address(), &record.depositor, &record.amount);
+    token.transfer(
+        &env.current_contract_address(),
+        &record.depositor,
+        &record.amount,
+    );
 
     env.events().publish(
         (symbol_short!("Cancelled"), id),
@@ -232,8 +243,7 @@ pub fn do_dispute(env: &Env, caller: &Address, id: Symbol) {
     caller.require_auth();
 
     let mut record = load_escrow(env, &id).expect("Escrow not found");
-    let is_party =
-        record.depositor == *caller || record.beneficiary == *caller;
+    let is_party = record.depositor == *caller || record.beneficiary == *caller;
     assert!(is_party, "Not a party");
     assert!(record.state == EscrowState::Active, "Escrow not active");
 

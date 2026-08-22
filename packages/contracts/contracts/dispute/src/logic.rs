@@ -15,7 +15,8 @@ pub fn initialize(env: &Env, admin: &Address) {
     storage::set_admin(env, admin);
     storage::set_paused(env, false);
     storage::set_arbitrators(env, &Vec::<Address>::new(env));
-    env.events().publish((symbol_short!("Init"),), admin.clone());
+    env.events()
+        .publish((symbol_short!("Init"),), admin.clone());
 }
 
 // =============================================================================
@@ -121,7 +122,7 @@ pub fn file_dispute(
     storage::push_dispute_id(env, &id);
 
     let client = token::Client::new(env, &token);
-    client.transfer(&disputer, &env.current_contract_address(), &amount);
+    client.transfer(&disputer, env.current_contract_address(), &amount);
 
     env.events().publish(
         (symbol_short!("DspOpen"), id, disputer),
@@ -179,7 +180,9 @@ pub fn decide(
     require_not_paused(env);
 
     assert!(
-        storage::get_arbitrators(env).iter().any(|a| a == arbitrator),
+        storage::get_arbitrators(env)
+            .iter()
+            .any(|a| a == arbitrator),
         "Not an arbitrator"
     );
     if let DisputeOutcome::Split = outcome {

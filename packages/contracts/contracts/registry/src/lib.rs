@@ -18,6 +18,15 @@
 //! Only SHA-256 digests are stored — see `location_hash` and `contact_hash` on [`Worker`].
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
+// Several contract entry points take more arguments than clippy's default
+// limit; `#[contractimpl]` mirrors them into generated client code, so the
+// lint has to be relaxed for the whole crate.
+#![allow(clippy::too_many_arguments)]
 
 use bluecollar_types::storage::extend_ttl;
 use soroban_sdk::{
@@ -389,48 +398,54 @@ impl RegistryContract {
         // Store admin in persistent storage
         env.storage().persistent().set(&DataKey::Admin, &admin);
         // Set initial schema version
-        env.storage().persistent().set(&DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &1u32);
         // Bootstrap: grant ROLE_ADMIN to the initial admin.
         let role = Symbol::new(&env, ROLE_ADMIN);
         let mut members: Vec<Address> = Vec::new(&env);
         members.push_back(admin.clone());
-        env.storage().persistent().set(&DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)), &members);
-        env.events().publish((symbol_short!("RlGrnt"), role, admin), ());
+        env.storage().persistent().set(
+            &DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)),
+            &members,
+        );
+        env.events()
+            .publish((symbol_short!("RlGrnt"), role, admin), ());
     }
 
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
 
-/// Return the member list for a role, or empty vec if no members exist.
-fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RoleMembers(Self::role_to_id_with_env(&env, role)))
-        .unwrap_or(Vec::new(env))
-}
-
-/// Create a role symbol efficiently (gas optimization #351).
-fn role_symbol(env: &Env, role_str: &str) -> Symbol {
-    Symbol::new(env, role_str)
-}
-
-/// Convert a role symbol to its compact u64 ID for storage optimization.
-fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
-    if *role == Symbol::new(env, ROLE_ADMIN_CACHED) {
-        ROLE_ADMIN_ID
-    } else if *role == Symbol::new(env, ROLE_PAUSER_CACHED) {
-        ROLE_PAUSER_ID
-    } else if *role == Symbol::new(env, ROLE_CURATOR_MGR_CACHED) {
-        ROLE_CURATOR_MGR_ID
-    } else if *role == Symbol::new(env, ROLE_REP_MGR_CACHED) {
-        ROLE_REP_MGR_ID
-    } else if *role == Symbol::new(env, ROLE_UPGRADER_CACHED) {
-        ROLE_UPGRADER_ID
-    } else {
-        u64::MAX
+    /// Return the member list for a role, or empty vec if no members exist.
+    fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RoleMembers(Self::role_to_id_with_env(env, role)))
+            .unwrap_or(Vec::new(env))
     }
-}
+
+    /// Create a role symbol efficiently (gas optimization #351).
+    fn role_symbol(env: &Env, role_str: &str) -> Symbol {
+        Symbol::new(env, role_str)
+    }
+
+    /// Convert a role symbol to its compact u64 ID for storage optimization.
+    fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
+        if *role == Symbol::new(env, ROLE_ADMIN_CACHED) {
+            ROLE_ADMIN_ID
+        } else if *role == Symbol::new(env, ROLE_PAUSER_CACHED) {
+            ROLE_PAUSER_ID
+        } else if *role == Symbol::new(env, ROLE_CURATOR_MGR_CACHED) {
+            ROLE_CURATOR_MGR_ID
+        } else if *role == Symbol::new(env, ROLE_REP_MGR_CACHED) {
+            ROLE_REP_MGR_ID
+        } else if *role == Symbol::new(env, ROLE_UPGRADER_CACHED) {
+            ROLE_UPGRADER_ID
+        } else {
+            u64::MAX
+        }
+    }
 
     /// Assert that `caller` holds `role` and has authorised this call.
     ///
@@ -473,9 +488,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         }
         let now = env.ledger().timestamp();
         let delegates = Self::get_delegates(env, &worker.id);
-        let is_valid_delegate = delegates.iter().any(|d| {
-            d.address == *caller && (d.expires_at == 0 || d.expires_at > now)
-        });
+        let is_valid_delegate = delegates
+            .iter()
+            .any(|d| d.address == *caller && (d.expires_at == 0 || d.expires_at > now));
         assert!(is_valid_delegate, "Not authorized");
     }
 
@@ -506,10 +521,14 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         let mut members = Self::get_role_members(&env, &role);
         if members.iter().all(|m| m != account) {
             members.push_back(account.clone());
-            env.storage().persistent().set(&DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)), &members);
+            env.storage().persistent().set(
+                &DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)),
+                &members,
+            );
         }
 
-        env.events().publish((symbol_short!("RlGrnt"), role, account), ());
+        env.events()
+            .publish((symbol_short!("RlGrnt"), role, account), ());
     }
 
     /// Revoke a role from an address. Caller must hold [`ROLE_ADMIN`].
@@ -542,14 +561,20 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             }
         }
         assert!(found, "Account does not hold role");
-        env.storage().persistent().set(&DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)), &updated);
+        env.storage().persistent().set(
+            &DataKey::RoleMembers(Self::role_to_id_with_env(&env, &role)),
+            &updated,
+        );
 
-        env.events().publish((symbol_short!("RlRvkd"), role, account), ());
+        env.events()
+            .publish((symbol_short!("RlRvkd"), role, account), ());
     }
 
     /// Returns `true` if `account` holds `role`.
     pub fn has_role(env: Env, role: Symbol, account: Address) -> bool {
-        Self::get_role_members(&env, &role).iter().any(|m| m == account)
+        Self::get_role_members(&env, &role)
+            .iter()
+            .any(|m| m == account)
     }
 
     /// Return all members of a role.
@@ -603,15 +628,18 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             }
         }
         if !found {
-            delegates.push_back(Delegate { address: delegate.clone(), expires_at });
+            delegates.push_back(Delegate {
+                address: delegate.clone(),
+                expires_at,
+            });
         }
 
-        env.storage().persistent().set(&DataKey::Delegates(id.clone()), &delegates);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Delegates(id.clone()), &delegates);
 
-        env.events().publish(
-            (symbol_short!("DlgAdd"), id, delegate),
-            expires_at,
-        );
+        env.events()
+            .publish((symbol_short!("DlgAdd"), id, delegate), expires_at);
     }
 
     /// Remove a delegate from a worker profile. Owner only.
@@ -652,12 +680,12 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         }
         assert!(removed, "Delegate not found");
 
-        env.storage().persistent().set(&DataKey::Delegates(id.clone()), &updated);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Delegates(id.clone()), &updated);
 
-        env.events().publish(
-            (symbol_short!("DlgRem"), id, delegate),
-            (),
-        );
+        env.events()
+            .publish((symbol_short!("DlgRem"), id, delegate), ());
     }
 
     /// Get all delegates for a worker.
@@ -745,10 +773,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         let mut curators = Self::get_curators(&env);
         if curators.iter().all(|c| c != curator) {
             curators.push_back(curator.clone());
-            env.storage().persistent().set(&DataKey::Curators, &curators);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Curators, &curators);
         }
 
-        env.events().publish((symbol_short!("CurAdd"), admin, curator), ());
+        env.events()
+            .publish((symbol_short!("CurAdd"), admin, curator), ());
     }
 
     /// Remove a curator (admin only).
@@ -776,7 +807,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         }
         env.storage().persistent().set(&DataKey::Curators, &updated);
 
-        env.events().publish((symbol_short!("CurRem"), admin, curator), ());
+        env.events()
+            .publish((symbol_short!("CurRem"), admin, curator), ());
     }
 
     /// Returns `true` if `addr` is an approved curator.
@@ -834,10 +866,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .get(&DataKey::Categories)
             .unwrap_or(Vec::new(&env));
         if !cats.is_empty() {
-            assert!(
-                cats.iter().any(|c| c == category),
-                "Unknown category"
-            );
+            assert!(cats.iter().any(|c| c == category), "Unknown category");
         }
 
         let worker = Worker {
@@ -885,10 +914,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::WorkerCount, &(count + 1));
 
-        env.events().publish(
-            (symbol_short!("WrkReg"), id),
-            (owner, category),
-        );
+        env.events()
+            .publish((symbol_short!("WrkReg"), id), (owner, category));
     }
 
     // -------------------------------------------------------------------------
@@ -918,9 +945,12 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         Self::require_owner_or_delegate(&env, &worker, &caller);
         worker.is_active = !worker.is_active;
         let new_status = worker.is_active;
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
 
-        env.events().publish((symbol_short!("WrkTgl"), id), new_status);
+        env.events()
+            .publish((symbol_short!("WrkTgl"), id), new_status);
     }
 
     /// Update a worker's name, category, location hash, and contact hash. Owner only.
@@ -964,12 +994,12 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.location_hash = location_hash;
         worker.contact_hash = contact_hash;
 
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
 
-        env.events().publish(
-            (symbol_short!("WrkUpd"), id),
-            (name, category),
-        );
+        env.events()
+            .publish((symbol_short!("WrkUpd"), id), (name, category));
     }
 
     /// Update a worker's name, category, and wallet address. Owner only.
@@ -1009,7 +1039,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.name = name.clone();
         worker.category = category.clone();
         worker.wallet = wallet.clone();
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
 
         env.events().publish(
             (symbol_short!("WrkUpd"), id, caller),
@@ -1040,7 +1072,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .get(&DataKey::Worker(id.clone()))
             .expect("Worker not found");
         assert!(worker.owner == caller, "Not authorized");
-        env.storage().persistent().remove(&DataKey::Worker(id.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Worker(id.clone()));
 
         let mut list: Vec<Symbol> = env
             .storage()
@@ -1064,10 +1098,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
                 .set(&DataKey::WorkerCount, &(count - 1));
         }
 
-        env.events().publish(
-            (symbol_short!("WrkDrg"), id, caller),
-            (),
-        );
+        env.events()
+            .publish((symbol_short!("WrkDrg"), id, caller), ());
     }
 
     // -------------------------------------------------------------------------
@@ -1155,7 +1187,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         VERSION
     }
 
-     /// Get the admin address.
+    /// Get the admin address.
     ///
     /// # Panics
     /// Panics with `"Not initialized"` if [`initialize`] has not been called.
@@ -1185,7 +1217,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
 
         let admin_role = Self::role_symbol(&env, ROLE_ADMIN);
-        let mut members = Self::get_role_members(&env, &admin_role);
+        let members = Self::get_role_members(&env, &admin_role);
         let mut updated: Vec<Address> = Vec::new(&env);
         for m in members.iter() {
             if m != current_admin {
@@ -1195,7 +1227,10 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         if updated.iter().all(|m| m != new_admin) {
             updated.push_back(new_admin.clone());
         }
-        env.storage().persistent().set(&DataKey::RoleMembers(Self::role_to_id_with_env(&env, &admin_role)), &updated);
+        env.storage().persistent().set(
+            &DataKey::RoleMembers(Self::role_to_id_with_env(&env, &admin_role)),
+            &updated,
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -1230,7 +1265,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         let prev = worker.reputation;
         worker.reputation = score;
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
 
         Self::append_reputation_history(&env, &id, prev, score, Symbol::new(&env, "manual"));
 
@@ -1242,9 +1279,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     // -------------------------------------------------------------------------
 
     /// Weights (out of 100) for the three reputation factors.
-    const REP_WEIGHT_QUALITY: u32 = 60;   // review quality (avg rating)
-    const REP_WEIGHT_VOLUME: u32 = 25;    // tip/job-completion volume
-    const REP_WEIGHT_RECENCY: u32 = 15;   // how recent the last review is
+    const REP_WEIGHT_QUALITY: u32 = 60; // review quality (avg rating)
+    const REP_WEIGHT_VOLUME: u32 = 25; // tip/job-completion volume
+    const REP_WEIGHT_RECENCY: u32 = 15; // how recent the last review is
 
     /// Recency half-life in seconds (~90 days).
     const RECENCY_HALF_LIFE_SECS: u64 = 7_776_000;
@@ -1311,13 +1348,22 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
                 / 100
         };
 
-        quality.checked_add(volume).expect("overflow")
-               .checked_add(recency).expect("overflow")
-               .min(10_000)
+        quality
+            .checked_add(volume)
+            .expect("overflow")
+            .checked_add(recency)
+            .expect("overflow")
+            .min(10_000)
     }
 
     /// Append an entry to the immutable reputation history (capped at MAX_HISTORY_LEN).
-    fn append_reputation_history(env: &Env, id: &Symbol, previous: u32, new_score: u32, reason: Symbol) {
+    fn append_reputation_history(
+        env: &Env,
+        id: &Symbol,
+        previous: u32,
+        new_score: u32,
+        reason: Symbol,
+    ) {
         let mut history: Vec<ReputationEvent> = env
             .storage()
             .persistent()
@@ -1386,7 +1432,10 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
                 last_review_at: 0,
             });
 
-        inputs.rating_sum = inputs.rating_sum.checked_add(rating as u64).expect("overflow");
+        inputs.rating_sum = inputs
+            .rating_sum
+            .checked_add(rating as u64)
+            .expect("overflow");
         inputs.rating_count = inputs.rating_count.checked_add(1).expect("overflow");
         inputs.last_review_at = now;
 
@@ -1403,9 +1452,17 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.reputation = new_score;
 
         // Slash check: avg below threshold with enough reviews
-        if worker.avg_rating < Self::SLASH_THRESHOLD_RATING && worker.review_count >= Self::SLASH_MIN_REVIEWS {
+        if worker.avg_rating < Self::SLASH_THRESHOLD_RATING
+            && worker.review_count >= Self::SLASH_MIN_REVIEWS
+        {
             let slashed = worker.reputation / 2;
-            Self::append_reputation_history(&env, &worker_id, worker.reputation, slashed, Symbol::new(&env, "slash"));
+            Self::append_reputation_history(
+                &env,
+                &worker_id,
+                worker.reputation,
+                slashed,
+                Symbol::new(&env, "slash"),
+            );
             worker.reputation = slashed;
             env.events().publish(
                 (Symbol::new(&env, "RepSlashed"), worker_id.clone()),
@@ -1417,7 +1474,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::Worker(worker_id.clone()), &worker);
 
-        Self::append_reputation_history(&env, &worker_id, prev_rep, new_score, Symbol::new(&env, "review"));
+        Self::append_reputation_history(
+            &env,
+            &worker_id,
+            prev_rep,
+            new_score,
+            Symbol::new(&env, "review"),
+        );
 
         env.events().publish(
             (symbol_short!("RevSub"), worker_id),
@@ -1477,7 +1540,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::Worker(worker_id.clone()), &worker);
 
-        Self::append_reputation_history(&env, &worker_id, prev_rep, new_score, Symbol::new(&env, "job_comp"));
+        Self::append_reputation_history(
+            &env,
+            &worker_id,
+            prev_rep,
+            new_score,
+            Symbol::new(&env, "job_comp"),
+        );
 
         env.events().publish(
             (symbol_short!("JobComp"), worker_id),
@@ -1521,7 +1590,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::Worker(worker_id.clone()), &worker);
 
-        Self::append_reputation_history(&env, &worker_id, prev, worker.reputation, Symbol::new(&env, "slash"));
+        Self::append_reputation_history(
+            &env,
+            &worker_id,
+            prev,
+            worker.reputation,
+            Symbol::new(&env, "slash"),
+        );
 
         env.events().publish(
             (symbol_short!("RepSlash"), worker_id),
@@ -1582,10 +1657,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         worker.review_count = review_count;
         worker.avg_rating = avg_rating;
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
         extend_ttl(&env, &DataKey::Worker(id.clone()));
 
-        env.events().publish((symbol_short!("RevUpd"), id), (review_count, avg_rating));
+        env.events()
+            .publish((symbol_short!("RevUpd"), id), (review_count, avg_rating));
     }
 
     /// Update a worker's subscription tier and expiration. Admin only.
@@ -1602,13 +1680,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     ///
     /// # Events
     /// Emits `("SubUpd", id)` with data `(tier, expires_at)`.
-    pub fn update_subscription(
-        env: Env,
-        admin: Address,
-        id: Symbol,
-        tier: u32,
-        expires_at: u64,
-    ) {
+    pub fn update_subscription(env: Env, admin: Address, id: Symbol, tier: u32, expires_at: u64) {
         Self::require_role(&env, &Symbol::new(&env, ROLE_ADMIN), &admin);
         Self::require_not_paused(&env);
 
@@ -1632,10 +1704,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             last_renewed_at: now,
         };
 
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
         extend_ttl(&env, &DataKey::Worker(id.clone()));
 
-        env.events().publish((symbol_short!("SubUpd"), id), (tier, expires_at));
+        env.events()
+            .publish((symbol_short!("SubUpd"), id), (tier, expires_at));
     }
 
     /// Renew a worker's subscription. Owner or delegate only.
@@ -1667,10 +1742,13 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.subscription.expires_at = new_expires_at;
         worker.subscription.last_renewed_at = now;
 
-        env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(id.clone()), &worker);
         extend_ttl(&env, &DataKey::Worker(id.clone()));
 
-        env.events().publish((symbol_short!("SubRnw"), id), new_expires_at);
+        env.events()
+            .publish((symbol_short!("SubRnw"), id), new_expires_at);
     }
 
     /// Get a worker's subscription status.
@@ -1725,7 +1803,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         if worker.verified_categories.iter().all(|c| c != category) {
             worker.verified_categories.push_back(category.clone());
-            env.storage().persistent().set(&DataKey::Worker(worker_id.clone()), &worker);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Worker(worker_id.clone()), &worker);
         }
 
         let verification = CategoryVerification {
@@ -1771,12 +1851,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     ///
     /// # Events
     /// Emits `("LocVfy", worker_id)` with data `(verifier, verified_at, expires_at)`.
-    pub fn verify_location(
-        env: Env,
-        verifier: Address,
-        worker_id: Symbol,
-        expires_at: u64,
-    ) {
+    pub fn verify_location(env: Env, verifier: Address, worker_id: Symbol, expires_at: u64) {
         verifier.require_auth();
         let _worker: Worker = env
             .storage()
@@ -1802,10 +1877,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     }
 
     /// Get the location verification record for a worker.
-    pub fn get_location_verification(
-        env: Env,
-        worker_id: Symbol,
-    ) -> Option<LocationVerification> {
+    pub fn get_location_verification(env: Env, worker_id: Symbol) -> Option<LocationVerification> {
         env.storage()
             .persistent()
             .get(&DataKey::LocationVerification(worker_id))
@@ -1850,10 +1922,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             updated_at: now,
             expires_at,
         };
-        env.storage().persistent().set(
-            &DataKey::AvailabilityStatus(id.clone()),
-            &status,
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::AvailabilityStatus(id.clone()), &status);
 
         env.events().publish(
             (symbol_short!("AvlUpd"), id),
@@ -1862,10 +1933,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     }
 
     /// Get the availability status for a worker.
-    pub fn get_availability(
-        env: Env,
-        worker_id: Symbol,
-    ) -> Option<AvailabilityStatus> {
+    pub fn get_availability(env: Env, worker_id: Symbol) -> Option<AvailabilityStatus> {
         env.storage()
             .persistent()
             .get(&DataKey::AvailabilityStatus(worker_id))
@@ -1911,7 +1979,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
                 worker.is_active = !worker.is_active;
                 let new_status = worker.is_active;
                 env.storage().persistent().set(&key, &worker);
-                env.events().publish((symbol_short!("WrkTgl"), id.clone()), new_status);
+                env.events()
+                    .publish((symbol_short!("WrkTgl"), id.clone()), new_status);
                 toggled.push_back(id);
             }
         }
@@ -2042,7 +2111,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         assert!(worker.owner == caller, "Not authorized");
 
         let client = token::Client::new(&env, &token_addr);
-        client.transfer(&caller, &env.current_contract_address(), &amount);
+        client.transfer(&caller, env.current_contract_address(), &amount);
 
         let now = env.ledger().timestamp();
         let mut info: StakeInfo = env
@@ -2058,20 +2127,28 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             });
 
         let elapsed = now.saturating_sub(info.last_reward_ledger);
-        let new_rewards = info.amount
+        let new_rewards = info
+            .amount
             .checked_mul(Self::REWARD_RATE_BPS_PER_1000_SECS)
             .and_then(|v| v.checked_mul(elapsed as i128))
             // bps (÷10_000) × per-1000-seconds (÷1_000) = ÷10_000_000
             .and_then(|v| v.checked_div(10_000_000))
             .expect("Reward overflow");
-        info.rewards_accumulated = info.rewards_accumulated.checked_add(new_rewards).expect("Reward overflow");
+        info.rewards_accumulated = info
+            .rewards_accumulated
+            .checked_add(new_rewards)
+            .expect("Reward overflow");
         info.last_reward_ledger = now;
         info.amount = info.amount.checked_add(amount).expect("Stake overflow");
         info.unstake_requested_at = 0;
-        env.storage().persistent().set(&DataKey::StakeInfo(worker_id.clone()), &info);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StakeInfo(worker_id.clone()), &info);
 
         worker.staked_amount = info.amount;
-        env.storage().persistent().set(&DataKey::Worker(worker_id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(worker_id.clone()), &worker);
 
         env.events().publish(
             (symbol_short!("Staked"), worker_id, caller),
@@ -2106,12 +2183,12 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         let now = env.ledger().timestamp();
         info.unstake_requested_at = now;
-        env.storage().persistent().set(&DataKey::StakeInfo(worker_id.clone()), &info);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StakeInfo(worker_id.clone()), &info);
 
-        env.events().publish(
-            (symbol_short!("UnstakeRq"), worker_id, caller),
-            now,
-        );
+        env.events()
+            .publish((symbol_short!("UnstakeRq"), worker_id, caller), now);
     }
 
     /// Finalise unstake after cooldown. Returns staked tokens + rewards to caller.
@@ -2146,15 +2223,22 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         );
 
         let elapsed = now.saturating_sub(info.last_reward_ledger);
-        let final_rewards = info.amount
+        let final_rewards = info
+            .amount
             .checked_mul(Self::REWARD_RATE_BPS_PER_1000_SECS)
             .and_then(|v| v.checked_mul(elapsed as i128))
             // bps (÷10_000) × per-1000-seconds (÷1_000) = ÷10_000_000
             .and_then(|v| v.checked_div(10_000_000))
             .expect("Reward overflow");
-        info.rewards_accumulated = info.rewards_accumulated.checked_add(final_rewards).expect("Reward overflow");
+        info.rewards_accumulated = info
+            .rewards_accumulated
+            .checked_add(final_rewards)
+            .expect("Reward overflow");
 
-        let total_return = info.amount.checked_add(info.rewards_accumulated).expect("Return overflow");
+        let total_return = info
+            .amount
+            .checked_add(info.rewards_accumulated)
+            .expect("Return overflow");
         let client = token::Client::new(&env, &info.token);
         client.transfer(&env.current_contract_address(), &caller, &total_return);
 
@@ -2163,10 +2247,14 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         info.amount = 0;
         info.rewards_accumulated = 0;
         info.unstake_requested_at = 0;
-        env.storage().persistent().set(&DataKey::StakeInfo(worker_id.clone()), &info);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StakeInfo(worker_id.clone()), &info);
 
         worker.staked_amount = 0;
-        env.storage().persistent().set(&DataKey::Worker(worker_id.clone()), &worker);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Worker(worker_id.clone()), &worker);
 
         env.events().publish(
             (symbol_short!("Unstaked"), worker_id, caller),
@@ -2176,7 +2264,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
     /// Get staking info for a worker.
     pub fn get_stake_info(env: Env, worker_id: Symbol) -> Option<StakeInfo> {
-        env.storage().persistent().get(&DataKey::StakeInfo(worker_id))
+        env.storage()
+            .persistent()
+            .get(&DataKey::StakeInfo(worker_id))
     }
 
     // -------------------------------------------------------------------------
@@ -2224,7 +2314,11 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         env.events().publish(
             (symbol_short!("MetUpd"), worker_id),
-            (jobs_completed, metrics.avg_rating, metrics.performance_score),
+            (
+                jobs_completed,
+                metrics.avg_rating,
+                metrics.performance_score,
+            ),
         );
     }
 
@@ -2235,9 +2329,19 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         }
         let rating_weight = 70u32;
         let completion_weight = 30u32;
-        let rating_score = metrics.avg_rating.checked_mul(rating_weight).expect("overflow") / 100;
-        let completion_score = metrics.jobs_completed.min(100).checked_mul(completion_weight).expect("overflow");
-        rating_score.checked_add(completion_score).expect("overflow")
+        let rating_score = metrics
+            .avg_rating
+            .checked_mul(rating_weight)
+            .expect("overflow")
+            / 100;
+        let completion_score = metrics
+            .jobs_completed
+            .min(100)
+            .checked_mul(completion_weight)
+            .expect("overflow");
+        rating_score
+            .checked_add(completion_score)
+            .expect("overflow")
     }
 
     /// Get performance metrics for a worker.
@@ -2265,7 +2369,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         let is_curator = Self::is_curator(env.clone(), issuer.clone());
         assert!(is_admin || is_curator, "Not authorized");
 
-        let worker: Worker = env
+        let _worker: Worker = env
             .storage()
             .persistent()
             .get(&DataKey::Worker(worker_id.clone()))
@@ -2319,10 +2423,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::Badge(worker_id.clone(), badge_id.clone()), &badge);
 
-        env.events().publish(
-            (symbol_short!("BdgRvk"), worker_id, badge_id),
-            caller,
-        );
+        env.events()
+            .publish((symbol_short!("BdgRvk"), worker_id, badge_id), caller);
     }
 
     /// Verify if a worker has a specific active badge.
@@ -2371,11 +2473,6 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     // Upgrade
     // -------------------------------------------------------------------------
 
-    /// Upgrade the contract WASM in-place, preserving the contract ID and all storage.
-    ///
-    /// # Parameters
-    /// - `new_wasm_hash`: The hash returned by `stellar contract install` for the new WASM.
-    ///
     // -------------------------------------------------------------------------
     // Schema migration (#535)
     // -------------------------------------------------------------------------
@@ -2426,7 +2523,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         // ----------------------------------------------------------------------
 
         let new_version = expected_version.checked_add(1).expect("Version overflow");
-        env.storage().persistent().set(&DataKey::SchemaVersion, &new_version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &new_version);
 
         env.events().publish(
             (symbol_short!("Migrated"),),
@@ -2545,9 +2644,12 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
                 updated.push_back(c);
             }
         }
-        env.storage().persistent().set(&DataKey::Categories, &updated);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Categories, &updated);
 
-        env.events().publish((Symbol::new(&env, "CatRemoved"), name), ());
+        env.events()
+            .publish((Symbol::new(&env, "CatRemoved"), name), ());
     }
 
     /// Return all valid on-chain categories.
@@ -2593,10 +2695,16 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .checked_add(Self::TIMELOCK_LEDGERS)
             .expect("Ledger overflow");
 
-        let pending = PendingUpgrade { wasm_hash: new_wasm_hash, execute_after_ledger };
-        env.storage().persistent().set(&DataKey::PendingUpgrade, &pending);
+        let pending = PendingUpgrade {
+            wasm_hash: new_wasm_hash,
+            execute_after_ledger,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::PendingUpgrade, &pending);
 
-        env.events().publish((symbol_short!("UpgPropsd"), execute_after_ledger), ());
+        env.events()
+            .publish((symbol_short!("UpgPropsd"), execute_after_ledger), ());
     }
 
     /// Execute a pending upgrade after the timelock has expired. Callable by anyone.
@@ -2621,7 +2729,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         env.storage().persistent().remove(&DataKey::PendingUpgrade);
         env.events().publish((symbol_short!("UpgExecd"),), ());
-        env.deployer().update_current_contract_wasm(pending.wasm_hash);
+        env.deployer()
+            .update_current_contract_wasm(pending.wasm_hash);
     }
 
     /// Cancel a pending upgrade. Admin only.
@@ -2680,7 +2789,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         Self::require_role(&env, &curator_mgr, &caller);
         Self::require_not_paused(&env);
         assert!(
-            env.storage().persistent().has(&DataKey::Worker(worker_id.clone())),
+            env.storage()
+                .persistent()
+                .has(&DataKey::Worker(worker_id.clone())),
             "Worker not found"
         );
 
@@ -2731,7 +2842,9 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         Self::require_role(&env, &curator_mgr, &caller);
         Self::require_not_paused(&env);
         assert!(
-            env.storage().persistent().has(&DataKey::Worker(worker_id.clone())),
+            env.storage()
+                .persistent()
+                .has(&DataKey::Worker(worker_id.clone())),
             "Worker not found"
         );
 
@@ -2743,7 +2856,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             expires_at,
         };
 
-        let mut skills: Vec<CertifiedSkill> = env
+        let skills: Vec<CertifiedSkill> = env
             .storage()
             .persistent()
             .get(&DataKey::CertifiedSkills(worker_id.clone()))
@@ -2782,12 +2895,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     ///
     /// # Events
     /// Emits `("SkillRvkd", worker_id, skill)` with data `caller`.
-    pub fn revoke_certified_skill(
-        env: Env,
-        caller: Address,
-        worker_id: Symbol,
-        skill: Symbol,
-    ) {
+    pub fn revoke_certified_skill(env: Env, caller: Address, worker_id: Symbol, skill: Symbol) {
         let curator_mgr = Self::role_symbol(&env, ROLE_CURATOR_MGR_CACHED);
         Self::require_role(&env, &curator_mgr, &caller);
         Self::require_not_paused(&env);
@@ -2813,10 +2921,8 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .persistent()
             .set(&DataKey::CertifiedSkills(worker_id.clone()), &updated);
 
-        env.events().publish(
-            (symbol_short!("SkillRvkd"), worker_id, skill),
-            caller,
-        );
+        env.events()
+            .publish((symbol_short!("SkillRvkd"), worker_id, skill), caller);
     }
 
     /// Get all certified skills for a worker.
@@ -2841,7 +2947,7 @@ mod test;
 mod tests {
     extern crate std;
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger, LedgerInfo}, Address, BytesN, Env, String, Symbol};
+    use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Symbol};
 
     struct TestEnv {
         env: Env,
@@ -2870,10 +2976,16 @@ mod tests {
             client.grant_role(&admin, &Symbol::new(&env, ROLE_REP_MGR), &admin);
             client.grant_role(&admin, &Symbol::new(&env, ROLE_UPGRADER), &admin);
 
-            TestEnv { env, contract_id, admin, curator, owner }
+            TestEnv {
+                env,
+                contract_id,
+                admin,
+                curator,
+                owner,
+            }
         }
 
-        fn client(&self) -> RegistryContractClient {
+        fn client(&self) -> RegistryContractClient<'_> {
             RegistryContractClient::new(&self.env, &self.contract_id)
         }
 
@@ -3054,7 +3166,8 @@ mod tests {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
-        t.client().update_reputation(&t.admin, &t.worker_id(), &8500);
+        t.client()
+            .update_reputation(&t.admin, &t.worker_id(), &8500);
         let worker = t.client().get_worker(&t.worker_id()).unwrap();
         assert_eq!(worker.reputation, 8500);
     }
@@ -3065,7 +3178,8 @@ mod tests {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
-        t.client().update_reputation(&t.admin, &t.worker_id(), &10_001);
+        t.client()
+            .update_reputation(&t.admin, &t.worker_id(), &10_001);
     }
 
     #[test]
@@ -3075,8 +3189,10 @@ mod tests {
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
         let stranger = Address::generate(&t.env);
-        t.client().update_reputation(&stranger, &t.worker_id(), &5000);
-    }    #[test]
+        t.client()
+            .update_reputation(&stranger, &t.worker_id(), &5000);
+    }
+    #[test]
     fn test_list_workers_paginated() {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
@@ -3111,11 +3227,14 @@ mod tests {
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
 
+        let cat = Symbol::new(&t.env, "plumber");
+        t.client()
+            .verify_category(&t.curator, &t.worker_id(), &cat, &9999);
 
-      let cat = Symbol::new(&t.env, "plumber");
-        t.client().verify_category(&t.curator, &t.worker_id(), &cat, &9999);
-
-        let v = t.client().get_category_verification(&t.worker_id(), &cat).unwrap();
+        let v = t
+            .client()
+            .get_category_verification(&t.worker_id(), &cat)
+            .unwrap();
         assert_eq!(v.curator, t.curator);
         assert_eq!(v.expires_at, 9999);
 
@@ -3130,8 +3249,10 @@ mod tests {
         t.register_worker(&t.curator);
 
         let cat = Symbol::new(&t.env, "plumber");
-        t.client().verify_category(&t.curator, &t.worker_id(), &cat, &9999);
-        t.client().verify_category(&t.curator, &t.worker_id(), &cat, &9999);
+        t.client()
+            .verify_category(&t.curator, &t.worker_id(), &cat, &9999);
+        t.client()
+            .verify_category(&t.curator, &t.worker_id(), &cat, &9999);
 
         let worker = t.client().get_worker(&t.worker_id()).unwrap();
         assert_eq!(worker.verified_categories.len(), 1);
@@ -3144,7 +3265,12 @@ mod tests {
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
         let stranger = Address::generate(&t.env);
-        t.client().verify_category(&stranger, &t.worker_id(), &Symbol::new(&t.env, "plumber"), &9999);
+        t.client().verify_category(
+            &stranger,
+            &t.worker_id(),
+            &Symbol::new(&t.env, "plumber"),
+            &9999,
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -3156,11 +3282,7 @@ mod tests {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
 
-        let ids = soroban_sdk::vec![
-            &t.env,
-            Symbol::new(&t.env, "b1"),
-            Symbol::new(&t.env, "b2"),
-        ];
+        let ids = soroban_sdk::vec![&t.env, Symbol::new(&t.env, "b1"), Symbol::new(&t.env, "b2"),];
         let owners = soroban_sdk::vec![&t.env, t.owner.clone(), t.owner.clone()];
         let names = soroban_sdk::vec![
             &t.env,
@@ -3174,9 +3296,9 @@ mod tests {
         ];
         let hashes = soroban_sdk::vec![&t.env, t.zero_hash(), t.zero_hash()];
 
-        let results = t.client().batch_register(
-            &t.curator, &ids, &owners, &names, &cats, &hashes, &hashes,
-        );
+        let results = t
+            .client()
+            .batch_register(&t.curator, &ids, &owners, &names, &cats, &hashes, &hashes);
 
         assert_eq!(results.len(), 2);
         assert!(results.get(0).unwrap().success);
@@ -3208,9 +3330,9 @@ mod tests {
         ];
         let hashes = soroban_sdk::vec![&t.env, t.zero_hash(), t.zero_hash()];
 
-        let results = t.client().batch_register(
-            &t.curator, &ids, &owners, &names, &cats, &hashes, &hashes,
-        );
+        let results = t
+            .client()
+            .batch_register(&t.curator, &ids, &owners, &names, &cats, &hashes, &hashes);
 
         assert!(!results.get(0).unwrap().success); // duplicate
         assert!(results.get(1).unwrap().success);
@@ -3238,7 +3360,8 @@ mod tests {
             hashes.push_back(t.zero_hash());
         }
 
-        t.client().batch_register(&t.curator, &ids, &owners, &names, &cats, &hashes, &hashes);
+        t.client()
+            .batch_register(&t.curator, &ids, &owners, &names, &cats, &hashes, &hashes);
     }
 
     // -------------------------------------------------------------------------
@@ -3259,8 +3382,7 @@ mod tests {
             let token_addr = token_id.address();
             StellarAssetClient::new(&base.env, &token_addr).mint(&base.owner, &1_000_000);
             // Mint to contract for reward payouts
-            StellarAssetClient::new(&base.env, &token_addr)
-                .mint(&base.contract_id, &1_000_000);
+            StellarAssetClient::new(&base.env, &token_addr).mint(&base.contract_id, &1_000_000);
             StakeTestEnv { base, token_addr }
         }
 
@@ -3268,7 +3390,7 @@ mod tests {
             use soroban_sdk::testutils::{Ledger, LedgerInfo};
             self.base.env.ledger().set(LedgerInfo {
                 timestamp: ts,
-                protocol_version: 22,
+                protocol_version: 26,
                 sequence_number: 1,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -3290,7 +3412,9 @@ mod tests {
         s.base.register_worker(&s.base.curator);
 
         s.set_time(1000);
-        s.base.client().stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &500_000);
+        s.base
+            .client()
+            .stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &500_000);
 
         let info = s.base.client().get_stake_info(&s.base.worker_id()).unwrap();
         assert_eq!(info.amount, 500_000);
@@ -3306,10 +3430,14 @@ mod tests {
         s.base.register_worker(&s.base.curator);
 
         s.set_time(1000);
-        s.base.client().stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &500_000);
+        s.base
+            .client()
+            .stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &500_000);
 
         s.set_time(2000);
-        s.base.client().request_unstake(&s.base.owner, &s.base.worker_id());
+        s.base
+            .client()
+            .request_unstake(&s.base.owner, &s.base.worker_id());
 
         // advance past cooldown
         s.set_time(2000 + 604_800 + 1);
@@ -3330,8 +3458,12 @@ mod tests {
         s.base.register_worker(&s.base.curator);
 
         s.set_time(1000);
-        s.base.client().stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &100_000);
-        s.base.client().request_unstake(&s.base.owner, &s.base.worker_id());
+        s.base
+            .client()
+            .stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &100_000);
+        s.base
+            .client()
+            .request_unstake(&s.base.owner, &s.base.worker_id());
         s.base.client().unstake(&s.base.owner, &s.base.worker_id());
     }
 
@@ -3343,9 +3475,15 @@ mod tests {
         s.base.register_worker(&s.base.curator);
 
         s.set_time(1000);
-        s.base.client().stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &100_000);
-        s.base.client().request_unstake(&s.base.owner, &s.base.worker_id());
-        s.base.client().request_unstake(&s.base.owner, &s.base.worker_id());
+        s.base
+            .client()
+            .stake(&s.base.owner, &s.base.worker_id(), &s.token_addr, &100_000);
+        s.base
+            .client()
+            .request_unstake(&s.base.owner, &s.base.worker_id());
+        s.base
+            .client()
+            .request_unstake(&s.base.owner, &s.base.worker_id());
     }
 
     // -------------------------------------------------------------------------
@@ -3361,7 +3499,10 @@ mod tests {
         let verifier = Address::generate(&t.env);
         t.client().verify_location(&verifier, &t.worker_id(), &9999);
 
-        let v = t.client().get_location_verification(&t.worker_id()).unwrap();
+        let v = t
+            .client()
+            .get_location_verification(&t.worker_id())
+            .unwrap();
         assert_eq!(v.verifier, verifier);
         assert_eq!(v.expires_at, 9999);
     }
@@ -3385,7 +3526,8 @@ mod tests {
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
 
-        t.client().update_availability(&t.worker_id(), &t.owner, &true, &9999);
+        t.client()
+            .update_availability(&t.worker_id(), &t.owner, &true, &9999);
 
         let status = t.client().get_availability(&t.worker_id()).unwrap();
         assert!(status.is_available);
@@ -3398,11 +3540,13 @@ mod tests {
         t.client().add_curator(&t.admin, &t.curator);
         t.register_worker(&t.curator);
 
-        t.client().update_availability(&t.worker_id(), &t.owner, &true, &0);
+        t.client()
+            .update_availability(&t.worker_id(), &t.owner, &true, &0);
         let status1 = t.client().get_availability(&t.worker_id()).unwrap();
         assert!(status1.is_available);
 
-        t.client().update_availability(&t.worker_id(), &t.owner, &false, &0);
+        t.client()
+            .update_availability(&t.worker_id(), &t.owner, &false, &0);
         let status2 = t.client().get_availability(&t.worker_id()).unwrap();
         assert!(!status2.is_available);
     }
@@ -3415,7 +3559,8 @@ mod tests {
         t.register_worker(&t.curator);
 
         let stranger = Address::generate(&t.env);
-        t.client().update_availability(&t.worker_id(), &stranger, &true, &0);
+        t.client()
+            .update_availability(&t.worker_id(), &stranger, &true, &0);
     }
 
     #[test]
@@ -3423,7 +3568,8 @@ mod tests {
     fn test_update_availability_nonexistent_worker_panics() {
         let t = TestEnv::new();
         let nonexistent = Symbol::new(&t.env, "nonexistent");
-        t.client().update_availability(&nonexistent, &t.owner, &true, &0);
+        t.client()
+            .update_availability(&nonexistent, &t.owner, &true, &0);
     }
 
     // -------------------------------------------------------------------------
@@ -3539,10 +3685,13 @@ mod tests {
             let id_str = std::format!("p{i}");
             let id = Symbol::new(&t.env, &id_str);
             t.client().register(
-                &id, &t.owner,
+                &id,
+                &t.owner,
                 &String::from_str(&t.env, "W"),
                 &Symbol::new(&t.env, "plumber"),
-                &t.zero_hash(), &t.zero_hash(), &t.curator,
+                &t.zero_hash(),
+                &t.zero_hash(),
+                &t.curator,
             );
         }
 
@@ -3560,10 +3709,13 @@ mod tests {
             let id_str = std::format!("q{i}");
             let id = Symbol::new(&t.env, &id_str);
             t.client().register(
-                &id, &t.owner,
+                &id,
+                &t.owner,
                 &String::from_str(&t.env, "W"),
                 &Symbol::new(&t.env, "plumber"),
-                &t.zero_hash(), &t.zero_hash(), &t.curator,
+                &t.zero_hash(),
+                &t.zero_hash(),
+                &t.curator,
             );
         }
 
@@ -3598,8 +3750,10 @@ mod tests {
     #[test]
     fn test_add_and_list_categories() {
         let t = TestEnv::new();
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "welder"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "welder"));
 
         let cats = t.client().list_categories();
         assert_eq!(cats.len(), 2);
@@ -3608,16 +3762,20 @@ mod tests {
     #[test]
     fn test_add_category_idempotent() {
         let t = TestEnv::new();
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
         assert_eq!(t.client().list_categories().len(), 1);
     }
 
     #[test]
     fn test_remove_category() {
         let t = TestEnv::new();
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
-        t.client().remove_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .remove_category(&t.admin, &Symbol::new(&t.env, "plumber"));
         assert_eq!(t.client().list_categories().len(), 0);
     }
 
@@ -3625,7 +3783,8 @@ mod tests {
     fn test_register_valid_category_succeeds() {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "plumber"));
         // Should not panic
         t.register_worker(&t.curator);
     }
@@ -3635,7 +3794,8 @@ mod tests {
     fn test_register_invalid_category_panics() {
         let t = TestEnv::new();
         t.client().add_curator(&t.admin, &t.curator);
-        t.client().add_category(&t.admin, &Symbol::new(&t.env, "welder"));
+        t.client()
+            .add_category(&t.admin, &Symbol::new(&t.env, "welder"));
         // "plumber" is not in the on-chain list
         t.register_worker(&t.curator);
     }

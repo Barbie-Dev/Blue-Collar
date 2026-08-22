@@ -69,7 +69,8 @@ impl ContractError {
     pub const JOB_NOT_OPEN: &'static str = "Job not open";
     pub const JOB_NOT_ASSIGNED: &'static str = "Job not assigned";
     pub const PAYMENT_NOT_LOCKED: &'static str = "Payment not locked";
-    pub const DISPUTE_NOT_OPEN_OR_IN_EVIDENCE: &'static str = "Dispute not open or in evidence phase";
+    pub const DISPUTE_NOT_OPEN_OR_IN_EVIDENCE: &'static str =
+        "Dispute not open or in evidence phase";
     pub const NOT_DECIDED_YET: &'static str = "Not decided yet";
     pub const NOT_DECIDABLE: &'static str = "Not decidable";
     pub const ARBITRATION_ALREADY_REQUESTED: &'static str = "Arbitration already requested";

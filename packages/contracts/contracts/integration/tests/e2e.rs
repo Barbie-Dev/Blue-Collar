@@ -10,16 +10,15 @@
 //!
 //! Run:
 //!   cargo test -p bluecollar-integration
-
+// `Env::register_contract` is deprecated in favour of `Env::register`; the test
+// helpers here are migrated alongside the contracts, not ahead of them.
+#![allow(deprecated)]
 #![cfg(test)]
 
-use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Ledger},
-    token, Address, BytesN, Env, String, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, BytesN, Env, String, Symbol};
 
-use bluecollar_registry::RegistryContractClient;
 use bluecollar_market::MarketContractClient;
+use bluecollar_registry::RegistryContractClient;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -28,15 +27,24 @@ fn zero_hash(env: &Env) -> BytesN<32> {
 }
 
 /// Deploy and initialise a fresh Registry contract.
-fn deploy_registry(env: &Env, admin: &Address) -> RegistryContractClient {
+///
+/// `add_curator` is gated behind the `curator_mgr` role, so grant it to the
+/// admin here — every caller of this helper goes on to manage curators.
+fn deploy_registry<'a>(env: &'a Env, admin: &Address) -> RegistryContractClient<'a> {
     let contract_id = env.register_contract(None, bluecollar_registry::RegistryContract);
     let client = RegistryContractClient::new(env, &contract_id);
     client.initialize(admin);
+    client.grant_role(admin, &Symbol::new(env, "curator_mgr"), admin);
     client
 }
 
 /// Deploy a mock token (soroban-sdk built-in) and mint `amount` to `to`.
-fn deploy_token(env: &Env, admin: &Address, to: &Address, amount: i128) -> token::Client {
+fn deploy_token<'a>(
+    env: &'a Env,
+    admin: &Address,
+    to: &Address,
+    amount: i128,
+) -> token::Client<'a> {
     let token_id = env.register_stellar_asset_contract(admin.clone());
     let admin_client = token::StellarAssetClient::new(env, &token_id);
     admin_client.mint(to, &amount);
@@ -44,12 +52,12 @@ fn deploy_token(env: &Env, admin: &Address, to: &Address, amount: i128) -> token
 }
 
 /// Deploy and initialise a fresh Market contract.
-fn deploy_market(
-    env: &Env,
+fn deploy_market<'a>(
+    env: &'a Env,
     admin: &Address,
     fee_bps: u32,
     fee_recipient: &Address,
-) -> MarketContractClient {
+) -> MarketContractClient<'a> {
     let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
     let client = MarketContractClient::new(env, &contract_id);
     client.initialize(admin, &fee_bps, fee_recipient);
@@ -63,9 +71,9 @@ fn registry_register_and_get_worker() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin   = Address::generate(&env);
+    let admin = Address::generate(&env);
     let curator = Address::generate(&env);
-    let owner   = Address::generate(&env);
+    let owner = Address::generate(&env);
 
     let registry = deploy_registry(&env, &admin);
 
@@ -85,7 +93,7 @@ fn registry_register_and_get_worker() {
     );
 
     // Assert worker exists and is active
-    let worker = registry.get_worker(&id);
+    let worker = registry.get_worker(&id).expect("worker registered");
     assert_eq!(worker.id, id);
     assert!(worker.is_active);
     assert_eq!(worker.owner, owner);
@@ -96,9 +104,9 @@ fn registry_toggle_active_status() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin   = Address::generate(&env);
+    let admin = Address::generate(&env);
     let curator = Address::generate(&env);
-    let owner   = Address::generate(&env);
+    let owner = Address::generate(&env);
 
     let registry = deploy_registry(&env, &admin);
     registry.add_curator(&admin, &curator);
@@ -116,12 +124,12 @@ fn registry_toggle_active_status() {
 
     // Toggle off
     registry.toggle(&id, &owner);
-    let w = registry.get_worker(&id);
+    let w = registry.get_worker(&id).expect("worker registered");
     assert!(!w.is_active);
 
     // Toggle back on
     registry.toggle(&id, &owner);
-    let w2 = registry.get_worker(&id);
+    let w2 = registry.get_worker(&id).expect("worker registered");
     assert!(w2.is_active);
 }
 
@@ -131,9 +139,9 @@ fn registry_register_without_curator_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin     = Address::generate(&env);
+    let admin = Address::generate(&env);
     let non_curator = Address::generate(&env);
-    let owner     = Address::generate(&env);
+    let owner = Address::generate(&env);
 
     let registry = deploy_registry(&env, &admin);
 
@@ -155,19 +163,19 @@ fn market_tip_transfers_net_amount_to_worker() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin     = Address::generate(&env);
-    let fee_recv  = Address::generate(&env);
-    let payer     = Address::generate(&env);
-    let worker    = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let fee_recv = Address::generate(&env);
+    let payer = Address::generate(&env);
+    let worker = Address::generate(&env);
 
     // 1% fee
     let market = deploy_market(&env, &admin, 100, &fee_recv);
-    let token  = deploy_token(&env, &admin, &payer, 10_000);
+    let token = deploy_token(&env, &admin, &payer, 10_000);
 
     market.tip(&payer, &worker, &token.address, &1_000);
 
     // fee = 1% of 1000 = 10; worker receives 990
-    assert_eq!(token.balance(&worker),   990);
+    assert_eq!(token.balance(&worker), 990);
     assert_eq!(token.balance(&fee_recv), 10);
 }
 
@@ -176,18 +184,18 @@ fn market_tip_zero_fee() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin  = Address::generate(&env);
-    let payer  = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let payer = Address::generate(&env);
     let worker = Address::generate(&env);
 
     let market = deploy_market(&env, &admin, 0, &admin);
-    let token  = deploy_token(&env, &admin, &payer, 5_000);
+    let token = deploy_token(&env, &admin, &payer, 5_000);
 
     market.tip(&payer, &worker, &token.address, &500);
 
     // No fee — worker receives full amount
     assert_eq!(token.balance(&worker), 500);
-    assert_eq!(token.balance(&admin),  0);
+    assert_eq!(token.balance(&admin), 0);
 }
 
 #[test]
@@ -195,12 +203,12 @@ fn market_escrow_create_and_release() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin    = Address::generate(&env);
-    let payer    = Address::generate(&env);
-    let worker   = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let payer = Address::generate(&env);
+    let worker = Address::generate(&env);
 
     let market = deploy_market(&env, &admin, 0, &admin);
-    let token  = deploy_token(&env, &admin, &payer, 10_000);
+    let token = deploy_token(&env, &admin, &payer, 10_000);
 
     let escrow_id = Symbol::new(&env, "esc_001");
     let expiry: u64 = env.ledger().timestamp() + 86_400; // 24 h
@@ -222,14 +230,14 @@ fn market_escrow_duplicate_id_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin  = Address::generate(&env);
-    let payer  = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let payer = Address::generate(&env);
     let worker = Address::generate(&env);
 
     let market = deploy_market(&env, &admin, 0, &admin);
-    let token  = deploy_token(&env, &admin, &payer, 10_000);
+    let token = deploy_token(&env, &admin, &payer, 10_000);
 
-    let id     = Symbol::new(&env, "dup");
+    let id = Symbol::new(&env, "dup");
     let expiry = env.ledger().timestamp() + 3_600;
 
     market.create_escrow(&id, &payer, &worker, &token.address, &100, &expiry);
@@ -243,16 +251,16 @@ fn register_worker_then_tip_end_to_end() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin     = Address::generate(&env);
-    let curator   = Address::generate(&env);
-    let fee_recv  = Address::generate(&env);
-    let payer     = Address::generate(&env);
-    let owner     = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let curator = Address::generate(&env);
+    let fee_recv = Address::generate(&env);
+    let payer = Address::generate(&env);
+    let owner = Address::generate(&env);
 
     // Deploy both contracts
     let registry = deploy_registry(&env, &admin);
-    let market   = deploy_market(&env, &admin, 200, &fee_recv); // 2% fee
-    let token    = deploy_token(&env, &admin, &payer, 50_000);
+    let market = deploy_market(&env, &admin, 200, &fee_recv); // 2% fee
+    let token = deploy_token(&env, &admin, &payer, 50_000);
 
     // Register worker
     registry.add_curator(&admin, &curator);
@@ -268,7 +276,7 @@ fn register_worker_then_tip_end_to_end() {
     );
 
     // Verify worker is on-chain and active
-    let w = registry.get_worker(&worker_id);
+    let w = registry.get_worker(&worker_id).expect("worker registered");
     assert!(w.is_active);
 
     // Tip the worker's wallet address

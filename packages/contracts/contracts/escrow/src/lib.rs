@@ -15,22 +15,29 @@
 //! `pause`, `unpause`, `is_paused`, `get_admin`, `upgrade`.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
 
 mod logic;
 mod storage;
 
+pub use storage::{EscrowRecord, EscrowState};
+
 #[cfg(test)]
 mod test;
 
 use logic::{
-    do_cancel, do_create, do_dispute, do_initialize, do_release, do_resolve, require_not_paused,
-    require_role, role_to_id, ROLE_ADMIN, ROLE_PAUSER, ROLE_UPGRADER,
+    do_cancel, do_create, do_dispute, do_initialize, do_release, do_resolve, require_role,
+    role_to_id, ROLE_ADMIN, ROLE_PAUSER, ROLE_UPGRADER,
 };
 use storage::{
     is_paused, load_admin, load_escrow, load_escrow_list, load_role_members, save_role_members,
-    set_paused, EscrowRecord,
+    set_paused,
 };
 
 pub const VERSION: u32 = 1;

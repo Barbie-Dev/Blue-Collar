@@ -1,10 +1,13 @@
 #![cfg(test)]
 extern crate std;
 
+use std::format;
+
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
     testutils::storage::Persistent,
+    testutils::Address as _,
+    testutils::Ledger,
     token::{Client as TokenClient, StellarAssetClient},
     Address, BytesN, Env, String, Symbol,
 };
@@ -40,10 +43,19 @@ impl AuthFixture {
         client.initialize(&admin);
         client.add_arbitrator(&admin, &arbitrator);
 
-        AuthFixture { env, contract, admin, disputer, respondent, arbitrator, stranger, token }
+        AuthFixture {
+            env,
+            contract,
+            admin,
+            disputer,
+            respondent,
+            arbitrator,
+            stranger,
+            token,
+        }
     }
 
-    fn client(&self) -> DisputeContractClient {
+    fn client(&self) -> DisputeContractClient<'_> {
         DisputeContractClient::new(&self.env, &self.contract)
     }
 
@@ -57,30 +69,6 @@ impl AuthFixture {
             &String::from_str(&self.env, "abc123"),
         );
     }
-}
-
-fn setup_no_mock() -> (Env, Address, Address, Address, Address, Address, Address) {
-    let env = Env::default();
-
-    let admin = Address::generate(&env);
-    let disputer = Address::generate(&env);
-    let respondent = Address::generate(&env);
-    let arbitrator = Address::generate(&env);
-    let stranger = Address::generate(&env);
-
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-    let token = token_id.address();
-    StellarAssetClient::new(&env, &token).mint(&disputer, &1_000_000);
-
-    let contract = env.register_contract(None, DisputeContract);
-    (env, contract, admin, disputer, respondent, arbitrator, token)
-}
-
-fn init_no_mock(env: &Env, contract: &Address, admin: &Address, arbitrator: &Address) {
-    let client = DisputeContractClient::new(env, contract);
-    // Need to use soroban_sdk auth framework for proper auth
-    // For non-mock tests, we use the Address's built-in authorization
-    // by calling from a test that doesn't use mock_all_auths
 }
 
 // =============================================================================
@@ -108,7 +96,8 @@ mod auth_failures {
     #[should_panic(expected = "Not authorized")]
     fn add_arbitrator_requires_admin() {
         let f = AuthFixture::new();
-        f.client().add_arbitrator(&f.stranger, &Address::generate(&f.env));
+        f.client()
+            .add_arbitrator(&f.stranger, &Address::generate(&f.env));
     }
 
     #[test]
@@ -181,7 +170,12 @@ mod paused_state {
     fn settle_while_paused() {
         let f = AuthFixture::new();
         f.open();
-        f.client().decide(&Symbol::new(&f.env, "d1"), &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client().decide(
+            &Symbol::new(&f.env, "d1"),
+            &f.arbitrator,
+            &DisputeOutcome::RefundDisputer,
+            &0,
+        );
         f.client().pause(&f.admin);
         f.client().settle(&Symbol::new(&f.env, "d1"));
     }
@@ -431,9 +425,7 @@ mod ttl {
         );
 
         let list_key = DataKey::DisputeList;
-        let ttl = env.as_contract(&contract, || {
-            env.storage().persistent().get_ttl(&list_key)
-        });
+        let ttl = env.as_contract(&contract, || env.storage().persistent().get_ttl(&list_key));
         assert!(
             ttl >= TTL_THRESHOLD,
             "dispute list TTL should be >= threshold after create, got {ttl}"
@@ -461,7 +453,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
 
         let disputer_before = TokenClient::new(&f.env, &f.token).balance(&f.disputer);
         f.client().settle(&id);
@@ -483,7 +476,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::ReleaseRespondent, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::ReleaseRespondent, &0);
 
         let respondent_before = TokenClient::new(&f.env, &f.token).balance(&f.respondent);
         f.client().settle(&id);
@@ -505,7 +499,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &5_000); // 50%
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &5_000); // 50%
 
         let disputer_before = TokenClient::new(&f.env, &f.token).balance(&f.disputer);
         let respondent_before = TokenClient::new(&f.env, &f.token).balance(&f.respondent);
@@ -532,7 +527,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &7_500); // 75%
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &7_500); // 75%
 
         let disputer_before = TokenClient::new(&f.env, &f.token).balance(&f.disputer);
         let respondent_before = TokenClient::new(&f.env, &f.token).balance(&f.respondent);
@@ -559,7 +555,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &0); // 0% to respondent
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &0); // 0% to respondent
 
         let disputer_before = TokenClient::new(&f.env, &f.token).balance(&f.disputer);
         let respondent_before = TokenClient::new(&f.env, &f.token).balance(&f.respondent);
@@ -586,7 +583,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &10_000); // 100% to respondent
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &10_000); // 100% to respondent
 
         let disputer_before = TokenClient::new(&f.env, &f.token).balance(&f.disputer);
         let respondent_before = TokenClient::new(&f.env, &f.token).balance(&f.respondent);
@@ -621,7 +619,8 @@ mod settlement {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
         f.client().settle(&id);
         f.client().settle(&id);
     }
@@ -638,7 +637,8 @@ mod arbitrator_management {
     #[should_panic(expected = "Not authorized")]
     fn add_arbitrator_requires_admin() {
         let f = AuthFixture::new();
-        f.client().add_arbitrator(&f.stranger, &Address::generate(&f.env));
+        f.client()
+            .add_arbitrator(&f.stranger, &Address::generate(&f.env));
     }
 
     #[test]
@@ -901,14 +901,14 @@ mod evidence {
         );
 
         // Disputer updates their evidence
-        f.client().submit_evidence(
-            &id,
-            &f.disputer,
-            &String::from_str(&f.env, "updated"),
-        );
+        f.client()
+            .submit_evidence(&id, &f.disputer, &String::from_str(&f.env, "updated"));
 
         let dispute = f.client().get_dispute(&id).unwrap();
-        assert_eq!(dispute.disputer_evidence, Some(String::from_str(&f.env, "updated")));
+        assert_eq!(
+            dispute.disputer_evidence,
+            Some(String::from_str(&f.env, "updated"))
+        );
     }
 }
 
@@ -940,7 +940,8 @@ mod decision {
         let dispute_before = f.client().get_dispute(&id).unwrap();
         assert_eq!(dispute_before.arbitrator, None);
 
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
 
         let dispute_after = f.client().get_dispute(&id).unwrap();
         assert_eq!(dispute_after.arbitrator, Some(f.arbitrator.clone()));
@@ -959,7 +960,8 @@ mod decision {
             &String::from_str(&f.env, "abc"),
         );
 
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &3_333);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &3_333);
 
         let dispute = f.client().get_dispute(&id).unwrap();
         assert_eq!(dispute.outcome, DisputeOutcome::Split);
@@ -979,11 +981,13 @@ mod decision {
             &100_000,
             &String::from_str(&f.env, "abc"),
         );
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
         f.client().settle(&id);
 
         // Try to decide again
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::RefundDisputer, &0);
     }
 }
 
@@ -1009,7 +1013,9 @@ mod views {
     #[test]
     fn get_dispute_nonexistent_returns_none() {
         let f = AuthFixture::new();
-        let result = f.client().get_dispute(&Symbol::new(&f.env, "d_nonexistent"));
+        let result = f
+            .client()
+            .get_dispute(&Symbol::new(&f.env, "d_nonexistent"));
         assert_eq!(result, None);
     }
 
@@ -1070,14 +1076,17 @@ mod state_transitions {
         assert_eq!(dispute.status, DisputeStatus::Evidence);
 
         // Step 3: Decide
-        f.client().decide(&id, &f.arbitrator, &DisputeOutcome::Split, &5_000);
+        f.client()
+            .decide(&id, &f.arbitrator, &DisputeOutcome::Split, &5_000);
         let dispute = f.client().get_dispute(&id).unwrap();
         assert_eq!(dispute.status, DisputeStatus::Decided);
 
-        // Step 4: Settle
+        // Step 4: Settle. `settled_at` records the ledger timestamp, so move the
+        // ledger off its default zero first.
+        f.env.ledger().set_timestamp(1_700_000_000);
         f.client().settle(&id);
         let dispute = f.client().get_dispute(&id).unwrap();
         assert_eq!(dispute.status, DisputeStatus::Settled);
-        assert!(dispute.settled_at > 0);
+        assert_eq!(dispute.settled_at, 1_700_000_000);
     }
 }

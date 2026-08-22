@@ -37,7 +37,7 @@ pub enum DisputeOutcome {
 
 /// On-chain dispute record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Dispute {
     /// Unique identifier.
     pub id: Symbol,
@@ -127,7 +127,7 @@ pub fn get_arbitrators(env: &Env) -> Vec<Address> {
     env.storage()
         .persistent()
         .get(&DataKey::Arbitrators)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write arbitrators list. Optimized to avoid redundant operations.
@@ -143,11 +143,15 @@ pub fn set_arbitrators(env: &Env, arbitrators: &Vec<Address>) {
 // =============================================================================
 
 pub fn has_dispute(env: &Env, id: &Symbol) -> bool {
-    env.storage().persistent().has(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .has(&DataKey::Dispute(id.clone()))
 }
 
 pub fn get_dispute(env: &Env, id: &Symbol) -> Option<Dispute> {
-    env.storage().persistent().get(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Dispute(id.clone()))
 }
 
 /// Persist a dispute record and extend its TTL.
@@ -162,7 +166,7 @@ pub fn get_dispute_list(env: &Env) -> Vec<Symbol> {
     env.storage()
         .persistent()
         .get(&DataKey::DisputeList)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Append a dispute id to the ordered list and extend its TTL.
@@ -172,7 +176,7 @@ pub fn push_dispute_id(env: &Env, id: &Symbol) {
     let mut list = get_dispute_list(env);
 
     // Only push if not already present (idempotent and prevents duplicates)
-    if !list.iter().any(|x| x == id) {
+    if !list.iter().any(|x| x == *id) {
         list.push_back(id.clone());
         env.storage().persistent().set(&key, &list);
         extend_ttl(env, &key);

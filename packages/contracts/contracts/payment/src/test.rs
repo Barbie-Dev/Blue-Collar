@@ -41,7 +41,7 @@ fn setup_env() -> (Env, Address, Address, Address, Address, Address) {
     (env, admin, fee_recipient, client_addr, worker, token_addr)
 }
 
-fn deploy(env: &Env) -> (Address, PaymentContractClient) {
+fn deploy(env: &Env) -> (Address, PaymentContractClient<'_>) {
     let id = env.register_contract(None, PaymentContract);
     let client = PaymentContractClient::new(env, &id);
     (id, client)
@@ -63,7 +63,7 @@ fn init(
 fn set_time(env: &Env, ts: u64) {
     env.ledger().set(LedgerInfo {
         timestamp: ts,
-        protocol_version: 22,
+        protocol_version: 26,
         sequence_number: 100,
         network_id: Default::default(),
         base_reserve: 10,
@@ -113,7 +113,7 @@ fn test_initialize_fee_too_high() {
 #[test]
 fn test_pay_with_fee() {
     let (env, admin, fee_recipient, client_addr, worker, token) = setup_env();
-    let (contract_id, pmt) = deploy(&env);
+    let (_contract_id, pmt) = deploy(&env);
     init(&env, &pmt, &admin, 100, &fee_recipient); // 1% fee
 
     let token_client = TokenClient::new(&env, &token);
@@ -198,7 +198,14 @@ fn test_lock_payment_zero_amount_panics() {
     let (_, pmt) = deploy(&env);
     init(&env, &pmt, &admin, 0, &fee_recipient);
     set_time(&env, 1_000);
-    pmt.lock_payment(&client_addr, &worker, &token, &Symbol::new(&env, "p1"), &0, &2_000);
+    pmt.lock_payment(
+        &client_addr,
+        &worker,
+        &token,
+        &Symbol::new(&env, "p1"),
+        &0,
+        &2_000,
+    );
 }
 
 #[test]
@@ -209,7 +216,14 @@ fn test_lock_payment_expired_expiry_panics() {
     init(&env, &pmt, &admin, 0, &fee_recipient);
     set_time(&env, 5_000);
     // expiry (1000) < now (5000)
-    pmt.lock_payment(&client_addr, &worker, &token, &Symbol::new(&env, "p1"), &1_000, &1_000);
+    pmt.lock_payment(
+        &client_addr,
+        &worker,
+        &token,
+        &Symbol::new(&env, "p1"),
+        &1_000,
+        &1_000,
+    );
 }
 
 #[test]
@@ -232,7 +246,14 @@ fn test_lock_payment_while_paused_panics() {
     init(&env, &pmt, &admin, 0, &fee_recipient);
     set_time(&env, 1_000);
     pmt.pause(&admin);
-    pmt.lock_payment(&client_addr, &worker, &token, &Symbol::new(&env, "p1"), &1_000, &9_000);
+    pmt.lock_payment(
+        &client_addr,
+        &worker,
+        &token,
+        &Symbol::new(&env, "p1"),
+        &1_000,
+        &9_000,
+    );
 }
 
 // ---------------------------------------------------------------------------

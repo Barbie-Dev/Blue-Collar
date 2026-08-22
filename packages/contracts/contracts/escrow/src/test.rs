@@ -46,7 +46,7 @@ fn deploy_and_init<'a>(
 fn set_time(env: &Env, ts: u64) {
     env.ledger().set(LedgerInfo {
         timestamp: ts,
-        protocol_version: 22,
+        protocol_version: 26,
         sequence_number: 100,
         network_id: Default::default(),
         base_reserve: 10,
@@ -215,7 +215,10 @@ fn test_cancel_escrow_by_admin_before_expiry() {
     let before = token_client.balance(&depositor);
     client.cancel_escrow(&admin, &id);
     assert_eq!(token_client.balance(&depositor), before + 3_000);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]
@@ -230,7 +233,10 @@ fn test_cancel_escrow_by_depositor_after_expiry() {
     // Advance past expiry
     set_time(&env, 3_000);
     client.cancel_escrow(&depositor, &id);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]
@@ -321,7 +327,10 @@ fn test_resolve_dispute_refund_to_depositor() {
     client.resolve_dispute(&admin, &id, &false);
 
     assert_eq!(token_client.balance(&depositor), before + 6_000);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]

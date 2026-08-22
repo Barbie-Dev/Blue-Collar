@@ -20,9 +20,16 @@
 //! No external calls occur before storage is updated.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
 use bluecollar_types::{storage::extend_ttl, ContractError};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
+};
 
 /// Maximum protocol fee: 500 bps = 5 %.
 pub const MAX_FEE_BPS: u32 = 500;
@@ -142,15 +149,25 @@ impl PaymentContract {
         // --- Checks ---
         assert!(
             !env.storage().instance().has(&DataKey::Config),
+            "{}",
             ContractError::ALREADY_INITIALIZED
         );
-        assert!(fee_bps <= MAX_FEE_BPS, ContractError::FEE_BPS_EXCEEDS_MAXIMUM);
+        assert!(
+            fee_bps <= MAX_FEE_BPS,
+            "{}",
+            ContractError::FEE_BPS_EXCEEDS_MAXIMUM
+        );
 
         // --- Effects ---
-        let config = Config { fee_bps, fee_recipient };
+        let config = Config {
+            fee_bps,
+            fee_recipient,
+        };
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &1u32);
 
         let role = Symbol::new(&env, ROLE_ADMIN);
         let mut members: Vec<Address> = Vec::new(&env);
@@ -178,7 +195,11 @@ impl PaymentContract {
     fn require_role(env: &Env, role: &Symbol, caller: &Address) {
         caller.require_auth();
         let members = Self::get_role_members(env, role);
-        assert!(members.iter().any(|m| m == *caller), ContractError::MISSING_ROLE);
+        assert!(
+            members.iter().any(|m| m == *caller),
+            "{}",
+            ContractError::MISSING_ROLE
+        );
     }
 
     fn require_not_paused(env: &Env) {
@@ -187,6 +208,7 @@ impl PaymentContract {
                 .instance()
                 .get::<_, bool>(&DataKey::Paused)
                 .unwrap_or(false),
+            "{}",
             ContractError::CONTRACT_IS_PAUSED
         );
     }
@@ -264,7 +286,11 @@ impl PaymentContract {
     /// - `"Missing role"` if caller does not hold `ROLE_FEE_MGR`.
     pub fn update_fee(env: Env, caller: Address, new_fee_bps: u32) {
         Self::require_role(&env, &Symbol::new(&env, ROLE_FEE_MGR), &caller);
-        assert!(new_fee_bps <= MAX_FEE_BPS, ContractError::FEE_BPS_EXCEEDS_MAXIMUM);
+        assert!(
+            new_fee_bps <= MAX_FEE_BPS,
+            "{}",
+            ContractError::FEE_BPS_EXCEEDS_MAXIMUM
+        );
         let mut config = Self::get_config(&env);
         config.fee_bps = new_fee_bps;
         env.storage().instance().set(&DataKey::Config, &config);
@@ -344,7 +370,7 @@ impl PaymentContract {
         // --- Checks ---
         Self::require_not_paused(&env);
         from.require_auth();
-        assert!(amount > 0, ContractError::AMOUNT_MUST_BE_POSITIVE);
+        assert!(amount > 0, "{}", ContractError::AMOUNT_MUST_BE_POSITIVE);
         let config = Self::get_config(&env);
 
         // --- Effects (compute fee split) ---
@@ -386,15 +412,17 @@ impl PaymentContract {
         // --- Checks ---
         Self::require_not_paused(&env);
         from.require_auth();
-        assert!(amount > 0, ContractError::AMOUNT_MUST_BE_POSITIVE);
+        assert!(amount > 0, "{}", ContractError::AMOUNT_MUST_BE_POSITIVE);
         assert!(
             expiry > env.ledger().timestamp(),
+            "{}",
             ContractError::EXPIRY_MUST_BE_IN_FUTURE
         );
         assert!(
             !env.storage()
                 .persistent()
                 .has(&DataKey::Payment(id.clone())),
+            "{}",
             ContractError::ALREADY_EXISTS
         );
 
@@ -415,7 +443,7 @@ impl PaymentContract {
 
         // --- Interactions ---
         let token = token::Client::new(&env, &token_addr);
-        token.transfer(&from, &env.current_contract_address(), &amount);
+        token.transfer(&from, env.current_contract_address(), &amount);
         env.events()
             .publish((symbol_short!("Locked"), id), (from, to, amount));
     }
@@ -444,8 +472,12 @@ impl PaymentContract {
         let is_admin = Self::get_role_members(&env, &Symbol::new(&env, ROLE_ADMIN))
             .iter()
             .any(|m| m == caller);
-        assert!(is_client || is_admin, ContractError::NOT_AUTHORIZED);
-        assert!(record.status == PaymentStatus::Locked, ContractError::PAYMENT_NOT_LOCKED);
+        assert!(is_client || is_admin, "{}", ContractError::NOT_AUTHORIZED);
+        assert!(
+            record.status == PaymentStatus::Locked,
+            "{}",
+            ContractError::PAYMENT_NOT_LOCKED
+        );
 
         // --- Effects ---
         record.status = PaymentStatus::Released;
@@ -456,7 +488,11 @@ impl PaymentContract {
 
         // --- Interactions ---
         let token = token::Client::new(&env, &record.token);
-        token.transfer(&env.current_contract_address(), &record.worker, &record.amount);
+        token.transfer(
+            &env.current_contract_address(),
+            &record.worker,
+            &record.amount,
+        );
         env.events().publish(
             (symbol_short!("Released"), id),
             (caller, record.worker, record.amount),
@@ -501,7 +537,11 @@ impl PaymentContract {
 
         // --- Interactions ---
         let token = token::Client::new(&env, &record.token);
-        token.transfer(&env.current_contract_address(), &record.client, &record.amount);
+        token.transfer(
+            &env.current_contract_address(),
+            &record.client,
+            &record.amount,
+        );
         env.events().publish(
             (symbol_short!("Refunded"), id),
             (caller, record.client, record.amount),

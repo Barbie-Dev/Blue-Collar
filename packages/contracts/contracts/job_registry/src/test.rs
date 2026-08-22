@@ -4,6 +4,8 @@
 #![cfg(test)]
 extern crate std;
 
+use std::format;
+
 use super::*;
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol};
 
@@ -11,7 +13,7 @@ fn zero_hash(env: &Env) -> BytesN<32> {
     BytesN::from_array(env, &[0u8; 32])
 }
 
-fn setup(env: &Env) -> (Address, Address, JobRegistryContractClient) {
+fn setup(env: &Env) -> (Address, Address, JobRegistryContractClient<'_>) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let poster = Address::generate(env);
@@ -386,17 +388,17 @@ fn test_pause_unpause_cycle() {
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Missing role")]
 fn test_pause_without_role_panics() {
     let env = Env::default();
-    let (_admin, poster, client) = setup(&env);
+    let (_admin, _poster, client) = setup(&env);
     let unauthorized = Address::generate(&env);
 
     client.pause(&unauthorized);
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Missing role")]
 fn test_unpause_without_role_panics() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
@@ -512,7 +514,7 @@ fn test_dispute_job_while_paused_panics() {
 #[test]
 fn test_grant_role_success() {
     let env = Env::default();
-    let (admin, poster, client) = setup(&env);
+    let (admin, _poster, client) = setup(&env);
     let user = Address::generate(&env);
     let role = Symbol::new(&env, logic::ROLE_PAUSER);
 
@@ -537,10 +539,10 @@ fn test_grant_role_idempotent() {
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Missing role")]
 fn test_grant_role_non_admin_panics() {
     let env = Env::default();
-    let (_admin, poster, client) = setup(&env);
+    let (_admin, _poster, client) = setup(&env);
     let user = Address::generate(&env);
     let unauthorized = Address::generate(&env);
     let role = Symbol::new(&env, logic::ROLE_PAUSER);
@@ -563,7 +565,7 @@ fn test_revoke_role_success() {
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Missing role")]
 fn test_revoke_role_non_admin_panics() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
@@ -675,7 +677,7 @@ fn test_assign_worker_nonexistent_job_panics() {
 
 #[test]
 #[should_panic(expected = "Not job poster")]
-fn test_assign_worker_not_poster_panics() {
+fn test_assign_worker_not_poster_panics_funded_job() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "job1");
@@ -995,7 +997,7 @@ fn test_poster_jobs_only_returns_user_jobs() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Missing role")]
 fn test_upgrade_without_role_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
@@ -1006,13 +1008,15 @@ fn test_upgrade_without_role_panics() {
 }
 
 #[test]
+#[should_panic(expected = "Wasm does not exist")]
 fn test_upgrade_with_role_succeeds() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
     let new_wasm_hash = zero_hash(&env);
 
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_UPGRADER), &admin);
-    // If this doesn't panic, the upgrade was authorized
-    // We can't actually test the result since it would update the contract
+    // With ROLE_UPGRADER the call clears the authorization gate and reaches the
+    // deployer, which then rejects the placeholder hash. Failing on the missing
+    // Wasm rather than on "Missing role" is what proves the caller was authorized.
     client.upgrade(&admin, &new_wasm_hash);
 }

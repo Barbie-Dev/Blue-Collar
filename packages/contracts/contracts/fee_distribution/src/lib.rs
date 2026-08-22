@@ -4,10 +4,14 @@
 //! with percentage-based splits.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String,
-    Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
 };
 
 /// Maximum allowed fee: 10000 bps = 100%.
@@ -171,7 +175,8 @@ impl FeeDistributionContract {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
         Self::require_role(&env, &admin_role, &caller);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("Unpaused"), caller), ());
+        env.events()
+            .publish((symbol_short!("Unpaused"), caller), ());
     }
 
     /// Set fee recipients with percentage splits.
@@ -191,7 +196,7 @@ impl FeeDistributionContract {
             .persistent()
             .set(&DataKey::FeeRecipients, &recipients);
         env.events()
-            .publish((symbol_short!("FeeRcp"), recipients.len() as u32), ());
+            .publish((symbol_short!("FeeRcp"), recipients.len()), ());
     }
 
     /// Get current fee recipients.
@@ -265,11 +270,7 @@ impl FeeDistributionContract {
                 .saturating_div(MAX_FEE_BPS as u128) as i128;
 
             if share > 0 {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &recipient.address,
-                    &share,
-                );
+                token_client.transfer(&env.current_contract_address(), &recipient.address, &share);
                 env.events().publish(
                     (symbol_short!("FeeDistr"), recipient.address.clone(), share),
                     (),
@@ -317,10 +318,8 @@ impl FeeDistributionContract {
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         let upgrader_role = Symbol::new(&env, ROLE_UPGRADER);
         Self::require_role(&env, &upgrader_role, &caller);
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash);
-        env.events()
-            .publish((symbol_short!("Upgrade"), caller), ());
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.events().publish((symbol_short!("Upgrade"), caller), ());
     }
 }
 
@@ -340,7 +339,8 @@ mod tests {
         let contract = env.register_contract(None, FeeDistributionContract);
         let client = FeeDistributionContractClient::new(&env, &contract);
         client.initialize(&admin);
-        assert!(env
-            .as_contract(&contract, || { env.storage().instance().has(&DataKey::Admin) }));
+        assert!(env.as_contract(&contract, || {
+            env.storage().instance().has(&DataKey::Admin)
+        }));
     }
 }

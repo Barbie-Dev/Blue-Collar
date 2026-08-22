@@ -23,6 +23,11 @@
 //! of how the implementation is organised.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 mod logic;
 mod storage;
@@ -272,16 +277,28 @@ mod tests {
             client.initialize(&admin);
             client.add_arbitrator(&admin, &arbitrator);
 
-            T { env, contract, admin, disputer, respondent, arbitrator, token }
+            T {
+                env,
+                contract,
+                admin,
+                disputer,
+                respondent,
+                arbitrator,
+                token,
+            }
         }
 
-        fn client(&self) -> DisputeContractClient {
+        fn client(&self) -> DisputeContractClient<'_> {
             DisputeContractClient::new(&self.env, &self.contract)
         }
 
-        fn id(&self) -> Symbol { Symbol::new(&self.env, "d1") }
+        fn id(&self) -> Symbol {
+            Symbol::new(&self.env, "d1")
+        }
 
-        fn hash(&self, s: &str) -> String { String::from_str(&self.env, s) }
+        fn hash(&self, s: &str) -> String {
+            String::from_str(&self.env, s)
+        }
 
         fn balance(&self, addr: &Address) -> i128 {
             TokenClient::new(&self.env, &self.token).balance(addr)
@@ -334,7 +351,8 @@ mod tests {
     fn test_submit_evidence_advances_status() {
         let t = T::new();
         t.open();
-        t.client().submit_evidence(&t.id(), &t.respondent, &t.hash("def456"));
+        t.client()
+            .submit_evidence(&t.id(), &t.respondent, &t.hash("def456"));
         let d = t.client().get_dispute(&t.id()).unwrap();
         assert_eq!(d.status, DisputeStatus::Evidence);
         assert!(d.respondent_evidence.is_some());
@@ -346,14 +364,20 @@ mod tests {
         let t = T::new();
         t.open();
         let stranger = Address::generate(&t.env);
-        t.client().submit_evidence(&t.id(), &stranger, &t.hash("xyz"));
+        t.client()
+            .submit_evidence(&t.id(), &stranger, &t.hash("xyz"));
     }
 
     #[test]
     fn test_decide_records_outcome() {
         let t = T::new();
         t.open();
-        t.client().decide(&t.id(), &t.arbitrator, &DisputeOutcome::ReleaseRespondent, &0);
+        t.client().decide(
+            &t.id(),
+            &t.arbitrator,
+            &DisputeOutcome::ReleaseRespondent,
+            &0,
+        );
         let d = t.client().get_dispute(&t.id()).unwrap();
         assert_eq!(d.status, DisputeStatus::Decided);
         assert_eq!(d.outcome, DisputeOutcome::ReleaseRespondent);
@@ -366,7 +390,8 @@ mod tests {
         let t = T::new();
         t.open();
         let stranger = Address::generate(&t.env);
-        t.client().decide(&t.id(), &stranger, &DisputeOutcome::RefundDisputer, &0);
+        t.client()
+            .decide(&t.id(), &stranger, &DisputeOutcome::RefundDisputer, &0);
     }
 
     #[test]
@@ -381,18 +406,27 @@ mod tests {
     fn test_settle_refund_disputer() {
         let t = T::new();
         t.open();
-        t.client().decide(&t.id(), &t.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        t.client()
+            .decide(&t.id(), &t.arbitrator, &DisputeOutcome::RefundDisputer, &0);
         t.client().settle(&t.id());
         assert_eq!(t.balance(&t.disputer), 1_000_000);
         assert_eq!(t.balance(&t.contract), 0);
-        assert_eq!(t.client().get_dispute(&t.id()).unwrap().status, DisputeStatus::Settled);
+        assert_eq!(
+            t.client().get_dispute(&t.id()).unwrap().status,
+            DisputeStatus::Settled
+        );
     }
 
     #[test]
     fn test_settle_release_respondent() {
         let t = T::new();
         t.open();
-        t.client().decide(&t.id(), &t.arbitrator, &DisputeOutcome::ReleaseRespondent, &0);
+        t.client().decide(
+            &t.id(),
+            &t.arbitrator,
+            &DisputeOutcome::ReleaseRespondent,
+            &0,
+        );
         t.client().settle(&t.id());
         assert_eq!(t.balance(&t.respondent), 100_000);
         assert_eq!(t.balance(&t.contract), 0);
@@ -403,7 +437,8 @@ mod tests {
         let t = T::new();
         t.open();
         // respondent gets 50% (5000 bps)
-        t.client().decide(&t.id(), &t.arbitrator, &DisputeOutcome::Split, &5_000);
+        t.client()
+            .decide(&t.id(), &t.arbitrator, &DisputeOutcome::Split, &5_000);
         t.client().settle(&t.id());
         assert_eq!(t.balance(&t.respondent), 50_000);
         assert_eq!(t.balance(&t.disputer), 950_000); // 900k initial + 50k back
@@ -415,7 +450,8 @@ mod tests {
     fn test_settle_twice_panics() {
         let t = T::new();
         t.open();
-        t.client().decide(&t.id(), &t.arbitrator, &DisputeOutcome::RefundDisputer, &0);
+        t.client()
+            .decide(&t.id(), &t.arbitrator, &DisputeOutcome::RefundDisputer, &0);
         t.client().settle(&t.id());
         t.client().settle(&t.id());
     }
@@ -458,8 +494,9 @@ mod tests {
 // call out to it. A hostile token implementation could try to re-enter the
 // dispute contract from inside its own `transfer` function while the
 // dispute's state hasn't been committed yet. These tests stand in a minimal
-// malicious "token" contract to prove that the checks-effects-interactions
-// ordering in `logic.rs` blocks that class of attack.
+// malicious "token" contract to prove that the attack is blocked: the Soroban
+// host refuses the re-entrant call outright, and the checks-effects-interactions
+// ordering in `logic.rs` is the second line of defence behind it.
 // =============================================================================
 
 #[cfg(test)]
@@ -467,8 +504,7 @@ mod reentrancy_tests {
     extern crate std;
     use super::*;
     use soroban_sdk::{
-        contract, contractimpl, contracttype, testutils::Address as _, Address, Env, String,
-        Symbol,
+        contract, contractimpl, contracttype, testutils::Address as _, Address, Env, String, Symbol,
     };
 
     #[contracttype]
@@ -539,7 +575,7 @@ mod reentrancy_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Not decided yet")]
+    #[should_panic(expected = "Contract re-entry is not allowed")]
     fn settle_reentrancy_is_blocked() {
         let env = Env::default();
         env.mock_all_auths();
@@ -573,15 +609,14 @@ mod reentrancy_tests {
         // Arm the reentrant call now that the dispute is `Decided`.
         token_client.setup(&contract, &id, &ReentryMode::Settle);
 
-        // `settle` commits `Settled` before calling the malicious token's
-        // `transfer`, so the token's attempted reentrant `settle` call must
-        // see status != Decided and panic — proving funds can't be drained
-        // twice via a hostile token.
+        // The token's `transfer` tries to call `settle` again. The host rejects
+        // the re-entrant call and the whole invocation unwinds, so funds can't
+        // be drained twice via a hostile token.
         client.settle(&id);
     }
 
     #[test]
-    #[should_panic(expected = "Dispute id already exists")]
+    #[should_panic(expected = "Contract re-entry is not allowed")]
     fn file_dispute_reentrancy_is_blocked() {
         let env = Env::default();
         env.mock_all_auths();

@@ -2,6 +2,9 @@
 //!
 //! Focus on authorization edge cases, amount validation, and escrow state transitions
 //! including create, release, cancel, and dispute resolution paths.
+// `Env::register_contract` is deprecated in favour of `Env::register`; the test
+// helpers here are migrated alongside the contracts, not ahead of them.
+#![allow(deprecated)]
 
 use proptest::prelude::*;
 use soroban_sdk::{
@@ -10,7 +13,7 @@ use soroban_sdk::{
     Address, Env, Symbol,
 };
 
-use bluecollar_escrow::{EscrowContract, EscrowContractClient};
+use bluecollar_escrow::{EscrowContract, EscrowContractClient, EscrowState};
 
 /// Generate a random positive escrow amount (1 to 50_000_000).
 fn arb_amount() -> impl Strategy<Value = i128> {
@@ -57,8 +60,7 @@ proptest! {
 
         let escrow = client.get_escrow(&id);
         assert_eq!(escrow.amount, amount);
-        assert!(!escrow.released);
-        assert!(!escrow.cancelled);
+        assert_eq!(escrow.state, EscrowState::Active);
 
         let depositor_balance = TokenClient::new(&env, &token_addr).balance(&depositor);
         assert_eq!(depositor_balance, 100_000_000 - amount);
@@ -97,7 +99,7 @@ proptest! {
         assert_eq!(beneficiary_after - beneficiary_before, amount);
 
         let escrow = client.get_escrow(&id);
-        assert!(escrow.released);
+        assert_eq!(escrow.state, EscrowState::Released);
     }
 
     /// Fuzz test: cancel escrow should refund depositor.
@@ -133,7 +135,7 @@ proptest! {
         assert_eq!(depositor_balance_after - depositor_balance_before, amount);
 
         let escrow = client.get_escrow(&id);
-        assert!(escrow.cancelled);
+        assert_eq!(escrow.state, EscrowState::Cancelled);
     }
 
     /// Fuzz test: expired escrow can be cancelled by depositor.
@@ -165,18 +167,19 @@ proptest! {
         // Fast forward past expiry
         env.ledger().set(LedgerInfo {
             timestamp: 200,
-            protocol_version: 21,
+            protocol_version: 26,
             sequence_number: 1,
             network_id: Default::default(),
-            base_fee_rate: 0,
-            min_temp_entry_expiration: 0,
-            min_persistent_entry_expiration: 0,
+            base_reserve: 10,
+            min_temp_entry_ttl: 1,
+            min_persistent_entry_ttl: 1,
+            max_entry_ttl: 100_000,
         });
 
         client.cancel_escrow(&depositor, &id);
 
         let escrow = client.get_escrow(&id);
-        assert!(escrow.cancelled);
+        assert_eq!(escrow.state, EscrowState::Cancelled);
     }
 
     /// Fuzz test: zero amount should be rejected.

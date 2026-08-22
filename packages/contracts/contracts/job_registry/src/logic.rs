@@ -162,8 +162,10 @@ pub fn do_assign_worker(env: &Env, caller: &Address, job_id: Symbol, worker: Add
     save_job(env, &job);
 
     // --- Interactions ---
-    env.events()
-        .publish((symbol_short!("Assigned"), job_id), (caller.clone(), worker));
+    env.events().publish(
+        (symbol_short!("Assigned"), job_id),
+        (caller.clone(), worker),
+    );
 }
 
 /// Mark a job as completed. Only the assigned worker may call this.
@@ -178,10 +180,7 @@ pub fn do_complete_job(env: &Env, caller: &Address, job_id: Symbol) {
     caller.require_auth();
 
     let mut job = load_job(env, &job_id).expect("Job not found");
-    assert!(
-        job.worker.as_ref() == Some(caller),
-        "Not assigned worker"
-    );
+    assert!(job.worker.as_ref() == Some(caller), "Not assigned worker");
     assert!(job.status == JobStatus::Assigned, "Job not assigned");
 
     // --- Effects ---

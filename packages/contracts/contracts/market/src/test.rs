@@ -42,7 +42,7 @@ fn init(env: &Env, contract: &Address, admin: &Address, fee_bps: u32, fee_recipi
 fn set_time(env: &Env, ts: u64) {
     env.ledger().set(LedgerInfo {
         timestamp: ts,
-        protocol_version: 22,
+        protocol_version: 26,
         sequence_number: 1,
         network_id: Default::default(),
         base_reserve: 10,
@@ -239,7 +239,14 @@ fn test_create_escrow_zero_amount() {
     init(&env, &contract, &admin, 0, &fee_recipient);
 
     let id = Symbol::new(&env, "esc1");
-    MarketContractClient::new(&env, &contract).create_escrow(&id, &from, &to, &token_addr, &0, &9999);
+    MarketContractClient::new(&env, &contract).create_escrow(
+        &id,
+        &from,
+        &to,
+        &token_addr,
+        &0,
+        &9999,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -445,7 +452,9 @@ fn test_get_escrow_nonexistent_returns_none() {
     let (env, admin, fee_recipient, _from, _to, _token) = setup();
     let contract = deploy(&env);
     init(&env, &contract, &admin, 0, &fee_recipient);
-    assert!(MarketContractClient::new(&env, &contract).get_escrow(&Symbol::new(&env, "nope")).is_none());
+    assert!(MarketContractClient::new(&env, &contract)
+        .get_escrow(&Symbol::new(&env, "nope"))
+        .is_none());
 }
 
 // ===========================================================================
@@ -490,10 +499,18 @@ mod upgrade_framework {
             let escrow_id = Symbol::new(&env, "esc1");
             client.create_escrow(&escrow_id, &from, &to, &token, &1_000, &9_999);
 
-            UpgradeFixture { env, contract, admin, from, to, token, escrow_id }
+            UpgradeFixture {
+                env,
+                contract,
+                admin,
+                from,
+                to,
+                token,
+                escrow_id,
+            }
         }
 
-        fn client(&self) -> MarketContractClient {
+        fn client(&self) -> MarketContractClient<'_> {
             MarketContractClient::new(&self.env, &self.contract)
         }
     }
@@ -604,9 +621,16 @@ mod pause_tests {
             init(&env, &contract, &admin, 0, &fee_recipient);
             let client = MarketContractClient::new(&env, &contract);
             client.grant_role(&admin, &Symbol::new(&env, ROLE_PAUSER), &admin);
-            PauseFixture { env, contract, admin, from, to, token }
+            PauseFixture {
+                env,
+                contract,
+                admin,
+                from,
+                to,
+                token,
+            }
         }
-        fn client(&self) -> MarketContractClient {
+        fn client(&self) -> MarketContractClient<'_> {
             MarketContractClient::new(&self.env, &self.contract)
         }
     }
@@ -662,7 +686,8 @@ mod pause_tests {
         let f = PauseFixture::new();
         f.client().pause(&f.admin);
         let id = Symbol::new(&f.env, "esc1");
-        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+        f.client()
+            .create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
     }
 
     #[test]
@@ -671,7 +696,8 @@ mod pause_tests {
         let f = PauseFixture::new();
         // Create escrow before pausing
         let id = Symbol::new(&f.env, "esc1");
-        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+        f.client()
+            .create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
         f.client().pause(&f.admin);
         f.client().release_escrow(&id, &f.from);
     }
@@ -682,7 +708,8 @@ mod pause_tests {
         let f = PauseFixture::new();
         set_time(&f.env, 1000);
         let id = Symbol::new(&f.env, "esc1");
-        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &2000);
+        f.client()
+            .create_escrow(&id, &f.from, &f.to, &f.token, &100, &2000);
         f.client().pause(&f.admin);
         set_time(&f.env, 3000);
         f.client().cancel_escrow(&id, &f.from);
@@ -694,7 +721,8 @@ mod pause_tests {
     fn get_escrow_works_while_paused() {
         let f = PauseFixture::new();
         let id = Symbol::new(&f.env, "esc1");
-        f.client().create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
+        f.client()
+            .create_escrow(&id, &f.from, &f.to, &f.token, &100, &9999);
         f.client().pause(&f.admin);
         // Should NOT panic
         let escrow = f.client().get_escrow(&id);
@@ -717,10 +745,7 @@ mod pause_tests {
         f.client().unpause(&f.admin);
         // Should NOT panic
         f.client().tip(&f.from, &f.to, &f.token, &100);
-        assert_eq!(
-            TokenClient::new(&f.env, &f.token).balance(&f.to),
-            100
-        );
+        assert_eq!(TokenClient::new(&f.env, &f.token).balance(&f.to), 100);
     }
 }
 
@@ -744,7 +769,6 @@ mod multi_asset_tests {
     struct AssetFixture {
         env: Env,
         contract: Address,
-        admin: Address,
         payer: Address,
         worker: Address,
         xlm: Address,
@@ -768,10 +792,18 @@ mod multi_asset_tests {
             let custom = custom_id.address();
             StellarAssetClient::new(&env, &custom).mint(&payer, &2_000);
 
-            AssetFixture { env, contract, admin, payer, worker, xlm, usdc, custom }
+            AssetFixture {
+                env,
+                contract,
+                payer,
+                worker,
+                xlm,
+                usdc,
+                custom,
+            }
         }
 
-        fn client(&self) -> MarketContractClient {
+        fn client(&self) -> MarketContractClient<'_> {
             MarketContractClient::new(&self.env, &self.contract)
         }
 
@@ -809,7 +841,11 @@ mod multi_asset_tests {
         // Tipping with USDC must not affect XLM balance and vice versa.
         let f = AssetFixture::new();
         f.client().tip(&f.payer, &f.worker, &f.usdc, &300);
-        assert_eq!(f.balance(&f.xlm, &f.worker), 0, "XLM should be unaffected by USDC tip");
+        assert_eq!(
+            f.balance(&f.xlm, &f.worker),
+            0,
+            "XLM should be unaffected by USDC tip"
+        );
         assert_eq!(f.balance(&f.usdc, &f.worker), 300);
     }
 
@@ -819,7 +855,8 @@ mod multi_asset_tests {
     fn escrow_create_and_release_with_usdc() {
         let f = AssetFixture::new();
         let id = Symbol::new(&f.env, "usdc_esc");
-        f.client().create_escrow(&id, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
+        f.client()
+            .create_escrow(&id, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
         assert_eq!(f.balance(&f.usdc, &f.payer), 4_000);
         assert_eq!(f.balance(&f.usdc, &f.contract), 1_000);
 
@@ -833,7 +870,8 @@ mod multi_asset_tests {
         let f = AssetFixture::new();
         set_time(&f.env, 1_000);
         let id = Symbol::new(&f.env, "ctok_esc");
-        f.client().create_escrow(&id, &f.payer, &f.worker, &f.custom, &500, &2_000);
+        f.client()
+            .create_escrow(&id, &f.payer, &f.worker, &f.custom, &500, &2_000);
         set_time(&f.env, 3_000);
         f.client().cancel_escrow(&id, &f.payer);
         assert_eq!(f.balance(&f.custom, &f.payer), 2_000);
@@ -846,8 +884,10 @@ mod multi_asset_tests {
         let f = AssetFixture::new();
         let id1 = Symbol::new(&f.env, "e1");
         let id2 = Symbol::new(&f.env, "e2");
-        f.client().create_escrow(&id1, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
-        f.client().create_escrow(&id2, &f.payer, &f.worker, &f.custom, &500, &9_999);
+        f.client()
+            .create_escrow(&id1, &f.payer, &f.worker, &f.usdc, &1_000, &9_999);
+        f.client()
+            .create_escrow(&id2, &f.payer, &f.worker, &f.custom, &500, &9_999);
 
         f.client().release_escrow(&id1, &f.payer);
         // id2 (custom) must still be locked
@@ -882,9 +922,13 @@ mod multi_asset_tests {
         let broke = Address::generate(&f.env);
         // No tokens minted for `broke` — create_escrow transfer must fail.
         let id = Symbol::new(&f.env, "broke_esc");
-        f.client().create_escrow(&id, &broke, &f.worker, &f.usdc, &1, &9_999);
+        f.client()
+            .create_escrow(&id, &broke, &f.worker, &f.usdc, &1, &9_999);
         // Verify no partial state was written
-        assert!(f.client().get_escrow(&id).is_none(), "escrow must not be stored after failed transfer");
+        assert!(
+            f.client().get_escrow(&id).is_none(),
+            "escrow must not be stored after failed transfer"
+        );
     }
 
     #[test]
@@ -896,7 +940,8 @@ mod multi_asset_tests {
         let id = Symbol::new(&f.env, "fail_esc");
         let broke = Address::generate(&f.env);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            f.client().create_escrow(&id, &broke, &f.worker, &f.usdc, &100, &9_999);
+            f.client()
+                .create_escrow(&id, &broke, &f.worker, &f.usdc, &100, &9_999);
         }));
         // The escrow must not exist in storage after a failed create.
         assert!(f.client().get_escrow(&id).is_none());

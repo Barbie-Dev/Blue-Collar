@@ -11,8 +11,6 @@ use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 // TTL Constants
 // =============================================================================
 
-pub use bluecollar_types::storage::{TTL_EXTEND_TO, TTL_THRESHOLD};
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -80,9 +78,7 @@ pub enum DataKey {
 
 /// Load an escrow record by id. Returns `None` if not found.
 pub fn load_escrow(env: &Env, id: &Symbol) -> Option<EscrowRecord> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Escrow(id.clone()))
+    env.storage().persistent().get(&DataKey::Escrow(id.clone()))
 }
 
 /// Write an escrow record and extend its TTL.
@@ -102,7 +98,7 @@ pub fn load_escrow_list(env: &Env) -> Vec<Symbol> {
     env.storage()
         .persistent()
         .get(&DataKey::EscrowList)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write the global escrow id list and extend its TTL.
@@ -133,7 +129,7 @@ pub fn load_role_members(env: &Env, role_id: u64) -> Vec<Address> {
     env.storage()
         .persistent()
         .get(&DataKey::RoleMembers(role_id))
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write the role member list and extend its TTL.

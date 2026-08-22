@@ -18,8 +18,19 @@
 //! Fees are sent to the `fee_recipient` address configured at initialisation.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
+// Several contract entry points take more arguments than clippy's default
+// limit; `#[contractimpl]` mirrors them into generated client code, so the
+// lint has to be relaxed for the whole crate.
+#![allow(clippy::too_many_arguments)]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol, Vec,
+};
 
 mod fees;
 use fees::split_fee;
@@ -215,16 +226,24 @@ impl MarketContract {
         // Store admin in persistent storage
         env.storage().persistent().set(&DataKey::Admin, &admin);
         // Set initial schema version
-        env.storage().persistent().set(&DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &1u32);
         // Store config in instance storage
-        let config = Config { fee_bps, fee_recipient };
+        let config = Config {
+            fee_bps,
+            fee_recipient,
+        };
         env.storage().instance().set(&DataKey::Config, &config);
         // Bootstrap: grant ROLE_ADMIN to the initial admin.
         let role = Symbol::new(&env, ROLE_ADMIN);
         let mut members: Vec<Address> = Vec::new(&env);
         members.push_back(admin.clone());
-        env.storage().persistent().set(&DataKey::RoleMembers(role_to_id(&env, &role)), &members);
-        env.events().publish((symbol_short!("RlGrnt"), role, admin), ());
+        env.storage()
+            .persistent()
+            .set(&DataKey::RoleMembers(role_to_id(&env, &role)), &members);
+        env.events()
+            .publish((symbol_short!("RlGrnt"), role, admin), ());
     }
 
     // -------------------------------------------------------------------------
@@ -270,20 +289,21 @@ impl MarketContract {
             .expect("Not initialized");
         config.fee_recipient = new_treasury.clone();
         env.storage().instance().set(&DataKey::Config, &config);
-        env.events().publish((symbol_short!("TrsSet"), caller), new_treasury);
+        env.events()
+            .publish((symbol_short!("TrsSet"), caller), new_treasury);
     }
 
     // -------------------------------------------------------------------------
     // Internal RBAC helpers
     // -------------------------------------------------------------------------
 
-/// Return the member list for a role, or empty vec if no members exist.
-fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::RoleMembers(role_to_id(env, role)))
-        .unwrap_or(Vec::new(env))
-}
+    /// Return the member list for a role, or empty vec if no members exist.
+    fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RoleMembers(role_to_id(env, role)))
+            .unwrap_or(Vec::new(env))
+    }
 
     /// Assert that `caller` holds `role` and has authorised this call.
     ///
@@ -327,10 +347,13 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         let mut members = Self::get_role_members(&env, &role);
         if members.iter().all(|m| m != account) {
             members.push_back(account.clone());
-            env.storage().persistent().set(&DataKey::RoleMembers(role_to_id(&env, &role)), &members);
+            env.storage()
+                .persistent()
+                .set(&DataKey::RoleMembers(role_to_id(&env, &role)), &members);
         }
 
-        env.events().publish((symbol_short!("RlGrnt"), role, account), ());
+        env.events()
+            .publish((symbol_short!("RlGrnt"), role, account), ());
     }
 
     /// Revoke a role from an address. Caller must hold [`ROLE_ADMIN`].
@@ -363,14 +386,19 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             }
         }
         assert!(found, "Account does not hold role");
-        env.storage().persistent().set(&DataKey::RoleMembers(role_to_id(&env, &role)), &updated);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RoleMembers(role_to_id(&env, &role)), &updated);
 
-        env.events().publish((symbol_short!("RlRvkd"), role, account), ());
+        env.events()
+            .publish((symbol_short!("RlRvkd"), role, account), ());
     }
 
     /// Returns `true` if `account` holds `role`.
     pub fn has_role(env: Env, role: Symbol, account: Address) -> bool {
-        Self::get_role_members(&env, &role).iter().any(|m| m == account)
+        Self::get_role_members(&env, &role)
+            .iter()
+            .any(|m| m == account)
     }
 
     /// Return all members of a role.
@@ -459,10 +487,10 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
     pub fn set_admin(env: Env, new_admin: Address) {
         let current_admin = Self::get_admin(env.clone());
         current_admin.require_auth(); // Require auth from current admin
-        
+
         // Update admin in persistent storage
         env.storage().persistent().set(&DataKey::Admin, &new_admin);
-        
+
         // Update role membership: remove old admin from ADMIN role, add new admin
         let admin_role = Self::role_symbol(&env, ROLE_ADMIN);
         let members = Self::get_role_members(&env, &admin_role);
@@ -476,7 +504,10 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         if !updated.iter().any(|m| m == new_admin) {
             updated.push_back(new_admin.clone()); // Add new admin if not already present
         }
-        env.storage().persistent().set(&DataKey::RoleMembers(role_to_id(&env, &admin_role)), &updated);
+        env.storage().persistent().set(
+            &DataKey::RoleMembers(role_to_id(&env, &admin_role)),
+            &updated,
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -517,16 +548,13 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         client.transfer(&from, &to, &worker_amount);
         if fee > 0 {
             client.transfer(&from, &config.fee_recipient, &fee);
-            env.events().publish(
-                (symbol_short!("FeeTaken"),),
-                (fee, config.fee_recipient),
-            );
+            env.events()
+                .publish((symbol_short!("FeeTaken"),), (fee, config.fee_recipient));
         }
 
-        env.events().publish(
-            (symbol_short!("TipSent"), from, to),
-            (token_addr, amount),
-        );    }
+        env.events()
+            .publish((symbol_short!("TipSent"), from, to), (token_addr, amount));
+    }
 
     // -------------------------------------------------------------------------
     // Escrow
@@ -581,7 +609,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             cancelled: false,
             arbitration_requested: false,
         };
-        env.storage().persistent().set(&DataKey::Escrow(id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(id.clone()), &escrow);
 
         env.events().publish(
             (symbol_short!("EscCrt"), id, from),
@@ -639,12 +669,12 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         }
 
         escrow.released = true;
-        env.storage().persistent().set(&DataKey::Escrow(id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(id.clone()), &escrow);
 
-        env.events().publish(
-            (symbol_short!("EscRel"), id, escrow.to),
-            escrow.amount,
-        );
+        env.events()
+            .publish((symbol_short!("EscRel"), id, escrow.to), escrow.amount);
     }
 
     /// Cancel escrow and refund the payer.
@@ -685,12 +715,12 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         client.transfer(&contract_addr, &escrow.from, &escrow.amount);
 
         escrow.cancelled = true;
-        env.storage().persistent().set(&DataKey::Escrow(id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(id.clone()), &escrow);
 
-        env.events().publish(
-            (symbol_short!("EscCnl"), id, escrow.from),
-            escrow.amount,
-        );
+        env.events()
+            .publish((symbol_short!("EscCnl"), id, escrow.from), escrow.amount);
     }
 
     /// Fetch escrow details by id.
@@ -788,18 +818,25 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             .expect("Escrow not found");
 
         assert!(!escrow.released && !escrow.cancelled, "Escrow not active");
-        assert!(env.ledger().timestamp() >= escrow.expiry, "Escrow not yet expired");
+        assert!(
+            env.ledger().timestamp() >= escrow.expiry,
+            "Escrow not yet expired"
+        );
 
         let client = token::Client::new(&env, &escrow.token);
-        client.transfer(&env.current_contract_address(), &escrow.from, &escrow.amount);
+        client.transfer(
+            &env.current_contract_address(),
+            &escrow.from,
+            &escrow.amount,
+        );
 
         escrow.cancelled = true;
-        env.storage().persistent().set(&DataKey::Escrow(id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(id.clone()), &escrow);
 
-        env.events().publish(
-            (symbol_short!("EscExp"), id, escrow.from),
-            escrow.amount,
-        );
+        env.events()
+            .publish((symbol_short!("EscExp"), id, escrow.from), escrow.amount);
     }
 
     // -------------------------------------------------------------------------
@@ -842,7 +879,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         Self::require_not_paused(&env);
         assert!(amount > 0, "Amount must be positive");
         assert!(
-            !env.storage().persistent().has(&DataKey::MultiSigEscrow(id.clone())),
+            !env.storage()
+                .persistent()
+                .has(&DataKey::MultiSigEscrow(id.clone())),
             "MultiSigEscrow id already exists"
         );
         assert!(
@@ -851,7 +890,7 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         );
 
         let client = token::Client::new(&env, &token_addr);
-        client.transfer(&from, &env.current_contract_address(), &amount);
+        client.transfer(&from, env.current_contract_address(), &amount);
 
         let escrow = MultiSigEscrow {
             from: from.clone(),
@@ -865,7 +904,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             released: false,
             cancelled: false,
         };
-        env.storage().persistent().set(&DataKey::MultiSigEscrow(id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultiSigEscrow(id.clone()), &escrow);
 
         env.events().publish(
             (symbol_short!("MsEscCrt"), id, from),
@@ -900,10 +941,7 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
 
         assert!(!escrow.released, "Already released");
         assert!(!escrow.cancelled, "Escrow cancelled");
-        assert!(
-            escrow.signers.iter().any(|s| s == caller),
-            "Not a signer"
-        );
+        assert!(escrow.signers.iter().any(|s| s == caller), "Not a signer");
         assert!(
             escrow.approvals.iter().all(|a| a != caller),
             "Already approved"
@@ -912,10 +950,8 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         escrow.approvals.push_back(caller.clone());
         let count = escrow.approvals.len();
 
-        env.events().publish(
-            (symbol_short!("MsEscApv"), id.clone(), caller),
-            count,
-        );
+        env.events()
+            .publish((symbol_short!("MsEscApv"), id.clone(), caller), count);
 
         if count >= escrow.threshold {
             let client = token::Client::new(&env, &escrow.token);
@@ -927,7 +963,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             );
         }
 
-        env.storage().persistent().set(&DataKey::MultiSigEscrow(id), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultiSigEscrow(id), &escrow);
     }
 
     /// Cancel a multi-sig escrow and refund the payer (after expiry, payer only).
@@ -950,17 +988,24 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         assert!(escrow.from == caller, "Not authorized");
         assert!(!escrow.released, "Already released");
         assert!(!escrow.cancelled, "Already cancelled");
-        assert!(env.ledger().timestamp() >= escrow.expiry, "Escrow not yet expired");
+        assert!(
+            env.ledger().timestamp() >= escrow.expiry,
+            "Escrow not yet expired"
+        );
 
         let client = token::Client::new(&env, &escrow.token);
-        client.transfer(&env.current_contract_address(), &escrow.from, &escrow.amount);
-        escrow.cancelled = true;
-        env.storage().persistent().set(&DataKey::MultiSigEscrow(id.clone()), &escrow);
-
-        env.events().publish(
-            (symbol_short!("MsEscCnl"), id, escrow.from),
-            escrow.amount,
+        client.transfer(
+            &env.current_contract_address(),
+            &escrow.from,
+            &escrow.amount,
         );
+        escrow.cancelled = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::MultiSigEscrow(id.clone()), &escrow);
+
+        env.events()
+            .publish((symbol_short!("MsEscCnl"), id, escrow.from), escrow.amount);
     }
 
     /// Fetch multi-sig escrow details by id.
@@ -1014,7 +1059,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
 
         // Re-use the Arbitration storage key — one record per escrow id.
         assert!(
-            !env.storage().persistent().has(&DataKey::Arbitration(escrow_id.clone())),
+            !env.storage()
+                .persistent()
+                .has(&DataKey::Arbitration(escrow_id.clone())),
             "Arbitration already requested"
         );
 
@@ -1158,9 +1205,12 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             .unwrap_or(Vec::new(&env));
         if arbitrators.iter().all(|a| a != arbitrator) {
             arbitrators.push_back(arbitrator.clone());
-            env.storage().persistent().set(&DataKey::Arbitrators, &arbitrators);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Arbitrators, &arbitrators);
         }
-        env.events().publish((symbol_short!("ArbAdd"), admin, arbitrator), ());
+        env.events()
+            .publish((symbol_short!("ArbAdd"), admin, arbitrator), ());
     }
 
     /// Remove an arbitrator address (admin only).
@@ -1185,8 +1235,11 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
                 updated.push_back(a.clone());
             }
         }
-        env.storage().persistent().set(&DataKey::Arbitrators, &updated);
-        env.events().publish((symbol_short!("ArbRem"), admin, arbitrator), ());
+        env.storage()
+            .persistent()
+            .set(&DataKey::Arbitrators, &updated);
+        env.events()
+            .publish((symbol_short!("ArbRem"), admin, arbitrator), ());
     }
 
     /// Request arbitration for a disputed escrow.
@@ -1204,21 +1257,32 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             .get(&DataKey::Escrow(escrow_id.clone()))
             .expect("Escrow not found");
         assert!(!escrow.released && !escrow.cancelled, "Escrow finalized");
-        assert!(!escrow.arbitration_requested, "Arbitration already requested");
-        assert!(escrow.from == caller || escrow.to == caller, "Not authorized");
+        assert!(
+            !escrow.arbitration_requested,
+            "Arbitration already requested"
+        );
+        assert!(
+            escrow.from == caller || escrow.to == caller,
+            "Not authorized"
+        );
 
         let arbitrators: Vec<Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Arbitrators)
             .unwrap_or(Vec::new(&env));
-        assert!(arbitrators.iter().any(|a| a == arbitrator), "Invalid arbitrator");
+        assert!(
+            arbitrators.iter().any(|a| a == arbitrator),
+            "Invalid arbitrator"
+        );
 
         let client = token::Client::new(&env, &escrow.token);
         client.transfer(&caller, &arbitrator, &fee);
 
         escrow.arbitration_requested = true;
-        env.storage().persistent().set(&DataKey::Escrow(escrow_id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(escrow_id.clone()), &escrow);
 
         let arbitration = Arbitration {
             escrow_id: escrow_id.clone(),
@@ -1227,7 +1291,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             fee,
             resolved: false,
         };
-        env.storage().persistent().set(&DataKey::Arbitration(escrow_id.clone()), &arbitration);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Arbitration(escrow_id.clone()), &arbitration);
 
         env.events().publish(
             (symbol_short!("ArbReq"), escrow_id, caller),
@@ -1258,7 +1324,11 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
             .expect("Escrow not found");
 
         let client = token::Client::new(&env, &escrow.token);
-        let recipient = if release_to_worker { &escrow.to } else { &escrow.from };
+        let recipient = if release_to_worker {
+            &escrow.to
+        } else {
+            &escrow.from
+        };
         client.transfer(&env.current_contract_address(), recipient, &escrow.amount);
 
         if release_to_worker {
@@ -1268,8 +1338,12 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         }
         arbitration.resolved = true;
 
-        env.storage().persistent().set(&DataKey::Escrow(escrow_id.clone()), &escrow);
-        env.storage().persistent().set(&DataKey::Arbitration(escrow_id.clone()), &arbitration);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(escrow_id.clone()), &escrow);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Arbitration(escrow_id.clone()), &arbitration);
 
         env.events().publish(
             (symbol_short!("ArbRes"), escrow_id, arbitrator),
@@ -1279,18 +1353,15 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
 
     /// Get arbitration details for an escrow.
     pub fn get_arbitration(env: Env, escrow_id: Symbol) -> Option<Arbitration> {
-        env.storage().persistent().get(&DataKey::Arbitration(escrow_id))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Arbitration(escrow_id))
     }
 
     // -------------------------------------------------------------------------
     // Upgrade
     // -------------------------------------------------------------------------
 
-    /// Upgrade the contract WASM in-place, preserving the contract ID and all storage.
-    ///
-    /// # Parameters
-    /// - `new_wasm_hash`: The hash returned by `stellar contract install` for the new WASM.
-    ///
     // -------------------------------------------------------------------------
     // Schema migration (#535)
     // -------------------------------------------------------------------------
@@ -1335,7 +1406,9 @@ fn get_role_members(env: &Env, role: &Symbol) -> Vec<Address> {
         // ----------------------------------------------------------------------
 
         let new_version = expected_version.checked_add(1).expect("Version overflow");
-        env.storage().persistent().set(&DataKey::SchemaVersion, &new_version);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &new_version);
 
         env.events().publish(
             (symbol_short!("Migrated"),),
@@ -1380,7 +1453,7 @@ mod tests {
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
         token::{Client as TokenClient, StellarAssetClient},
-        Address, Env, Symbol, Vec,
+        Address, Env, Symbol,
     };
 
     struct TestEnv {
@@ -1415,10 +1488,17 @@ mod tests {
             client.grant_role(&admin, &Symbol::new(&env, ROLE_DISPUTE_MGR), &admin);
             client.grant_role(&admin, &Symbol::new(&env, ROLE_UPGRADER), &admin);
 
-            TestEnv { env, contract_id, admin, payer, worker, token_addr }
+            TestEnv {
+                env,
+                contract_id,
+                admin,
+                payer,
+                worker,
+                token_addr,
+            }
         }
 
-        fn client(&self) -> MarketContractClient {
+        fn client(&self) -> MarketContractClient<'_> {
             MarketContractClient::new(&self.env, &self.contract_id)
         }
 
@@ -1433,7 +1513,7 @@ mod tests {
         fn set_time(&self, ts: u64) {
             self.env.ledger().set(LedgerInfo {
                 timestamp: ts,
-                protocol_version: 22,
+                protocol_version: 26,
                 sequence_number: 1,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -1553,7 +1633,8 @@ mod tests {
     fn test_create_escrow_locks_funds() {
         let t = TestEnv::new();
         let id = t.id();
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &9999);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &9999);
 
         assert_eq!(t.token_balance(&t.payer), 700_000);
         assert_eq!(t.token_balance(&t.contract_id), 300_000);
@@ -1570,8 +1651,10 @@ mod tests {
     fn test_create_escrow_duplicate_id_panics() {
         let t = TestEnv::new();
         let id = t.id();
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999);
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999);
     }
 
     #[test]
@@ -1579,7 +1662,8 @@ mod tests {
     fn test_create_escrow_zero_amount_panics() {
         let t = TestEnv::new();
         let id = t.id();
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &0, &9999);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &0, &9999);
     }
 
     #[test]
@@ -1613,7 +1697,8 @@ mod tests {
         let t = TestEnv::new();
         let id = t.id();
         let stranger = Address::generate(&t.env);
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &9999);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &9999);
         t.client().release_escrow(&id, &stranger);
     }
 
@@ -1665,7 +1750,8 @@ mod tests {
         let id = t.id();
 
         t.set_time(500);
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &2000);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &2000);
         t.client().cancel_escrow(&id, &t.payer);
     }
 
@@ -1676,7 +1762,8 @@ mod tests {
         let id = t.id();
 
         t.set_time(5000);
-        t.client().create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &2000);
+        t.client()
+            .create_escrow(&id, &t.payer, &t.worker, &t.token_addr, &300_000, &2000);
         t.client().cancel_escrow(&id, &t.worker);
     }
 
@@ -1725,7 +1812,16 @@ mod tests {
         let s2 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &200_000, &9999, &signers, &2);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &200_000,
+            &9999,
+            &signers,
+            &2,
+        );
         assert_eq!(t.token_balance(&t.contract_id), 200_000);
 
         t.client().approve_multisig_release(&id, &s1);
@@ -1745,7 +1841,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms2");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
         let stranger = Address::generate(&t.env);
         t.client().approve_multisig_release(&id, &stranger);
     }
@@ -1758,7 +1863,16 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let s2 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
         t.client().approve_multisig_release(&id, &s1);
         t.client().approve_multisig_release(&id, &s1);
     }
@@ -1770,14 +1884,23 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
 
-         t.set_time(1000);
-         t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &2000, &signers, &1);
-         t.set_time(3000);
-         t.client().cancel_multisig_escrow(&id, &t.payer);
+        t.set_time(1000);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &2000,
+            &signers,
+            &1,
+        );
+        t.set_time(3000);
+        t.client().cancel_multisig_escrow(&id, &t.payer);
 
-         assert_eq!(t.token_balance(&t.payer), 1_000_000);
-         assert!(t.client().get_multisig_escrow(&id).unwrap().cancelled);
-     }
+        assert_eq!(t.token_balance(&t.payer), 1_000_000);
+        assert!(t.client().get_multisig_escrow(&id).unwrap().cancelled);
+    }
 
     // ── Additional multi-sig edge-case tests ─────────────────────────────────
 
@@ -1787,7 +1910,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms5");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &50_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &50_000,
+            &9999,
+            &signers,
+            &1,
+        );
 
         t.client().approve_multisig_release(&id, &s1);
 
@@ -1802,8 +1934,26 @@ mod tests {
         let id = Symbol::new(&t.env, "ms6");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
     }
 
     #[test]
@@ -1813,7 +1963,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms7");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &0, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &0,
+            &9999,
+            &signers,
+            &1,
+        );
     }
 
     #[test]
@@ -1824,7 +1983,16 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
         // threshold 2 but only 1 signer
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
     }
 
     #[test]
@@ -1834,7 +2002,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms9");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &0);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &0,
+        );
     }
 
     #[test]
@@ -1844,7 +2021,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms10");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
         // First approval releases (threshold=1)
         t.client().approve_multisig_release(&id, &s1);
         // Attempt second approval on a released escrow
@@ -1859,7 +2045,16 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
         t.set_time(500);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &2000, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &2000,
+            &signers,
+            &1,
+        );
         // Try to cancel before expiry
         t.client().cancel_multisig_escrow(&id, &t.payer);
     }
@@ -1872,7 +2067,16 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
         t.set_time(1000);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &2000, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &2000,
+            &signers,
+            &1,
+        );
         t.set_time(3000);
         t.client().cancel_multisig_escrow(&id, &t.payer);
         t.client().cancel_multisig_escrow(&id, &t.payer);
@@ -1886,7 +2090,16 @@ mod tests {
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
         t.set_time(1000);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &2000, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &2000,
+            &signers,
+            &1,
+        );
         t.set_time(3000);
         // worker tries to cancel — only payer (from) is allowed
         t.client().cancel_multisig_escrow(&id, &t.worker);
@@ -1900,7 +2113,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms14");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
     }
 
     #[test]
@@ -1910,7 +2132,16 @@ mod tests {
         let id = Symbol::new(&t.env, "ms15");
         let s1 = Address::generate(&t.env);
         let signers = soroban_sdk::vec![&t.env, s1.clone()];
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &1);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &1,
+        );
         t.client().pause(&t.admin);
         t.client().approve_multisig_release(&id, &s1);
     }
@@ -1923,20 +2154,32 @@ mod tests {
         let id = Symbol::new(&t.env, "msa1");
         let s1 = Address::generate(&t.env);
         let arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
         t.client().add_arbitrator(&arbitrator);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &200_000, &9999, &signers, &2);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &200_000,
+            &9999,
+            &signers,
+            &2,
+        );
 
         // Payer requests arbitration with 0 fee to keep balances simple
-        t.client().request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
 
         let arb = t.client().get_multisig_arbitration(&id).unwrap();
         assert!(!arb.resolved);
         assert_eq!(arb.arbitrator, arbitrator);
 
         // Arbitrator resolves in worker's favour
-        t.client().resolve_multisig_arbitration(&id, &arbitrator, &true);
+        t.client()
+            .resolve_multisig_arbitration(&id, &arbitrator, &true);
 
         assert_eq!(t.token_balance(&t.worker), 200_000);
         assert!(t.client().get_multisig_escrow(&id).unwrap().released);
@@ -1949,14 +2192,26 @@ mod tests {
         let id = Symbol::new(&t.env, "msa2");
         let s1 = Address::generate(&t.env);
         let arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
         t.client().add_arbitrator(&arbitrator);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
-        t.client().request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
 
         // Arbitrator resolves in payer's favour
-        t.client().resolve_multisig_arbitration(&id, &arbitrator, &false);
+        t.client()
+            .resolve_multisig_arbitration(&id, &arbitrator, &false);
 
         assert_eq!(t.token_balance(&t.payer), 1_000_000);
         assert!(t.client().get_multisig_escrow(&id).unwrap().cancelled);
@@ -1969,12 +2224,24 @@ mod tests {
         let id = Symbol::new(&t.env, "msa3");
         let s1 = Address::generate(&t.env);
         let arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
         t.client().add_arbitrator(&arbitrator);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
-        t.client().request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
-        t.client().request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
     }
 
     #[test]
@@ -1984,12 +2251,23 @@ mod tests {
         let id = Symbol::new(&t.env, "msa4");
         let s1 = Address::generate(&t.env);
         let arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
         let stranger = Address::generate(&t.env);
 
         t.client().add_arbitrator(&arbitrator);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
-        t.client().request_multisig_arbitration(&id, &stranger, &arbitrator, &0);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
+        t.client()
+            .request_multisig_arbitration(&id, &stranger, &arbitrator, &0);
     }
 
     #[test]
@@ -1999,10 +2277,21 @@ mod tests {
         let id = Symbol::new(&t.env, "msa5");
         let s1 = Address::generate(&t.env);
         let fake_arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
-        t.client().request_multisig_arbitration(&id, &t.payer, &fake_arbitrator, &0);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &fake_arbitrator, &0);
     }
 
     #[test]
@@ -2012,13 +2301,26 @@ mod tests {
         let id = Symbol::new(&t.env, "msa6");
         let s1 = Address::generate(&t.env);
         let arbitrator = Address::generate(&t.env);
-        let signers = soroban_sdk::vec![&t.env, s1.clone()];
+        let s2 = Address::generate(&t.env);
+        let signers = soroban_sdk::vec![&t.env, s1.clone(), s2.clone()];
 
         t.client().add_arbitrator(&arbitrator);
-        t.client().create_multisig_escrow(&id, &t.payer, &t.worker, &t.token_addr, &100_000, &9999, &signers, &2);
-        t.client().request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
-        t.client().resolve_multisig_arbitration(&id, &arbitrator, &true);
-        t.client().resolve_multisig_arbitration(&id, &arbitrator, &true);
+        t.client().create_multisig_escrow(
+            &id,
+            &t.payer,
+            &t.worker,
+            &t.token_addr,
+            &100_000,
+            &9999,
+            &signers,
+            &2,
+        );
+        t.client()
+            .request_multisig_arbitration(&id, &t.payer, &arbitrator, &0);
+        t.client()
+            .resolve_multisig_arbitration(&id, &arbitrator, &true);
+        t.client()
+            .resolve_multisig_arbitration(&id, &arbitrator, &true);
     }
 
     // -------------------------------------------------------------------------
@@ -2069,7 +2371,7 @@ mod tests {
         t.client().migrate(&t.admin, &2u32);
         assert_eq!(t.client().get_schema_version(), 3u32);
     }
- }
+}
 
 // ---------------------------------------------------------------------------
 // Admin access control & upgrade authorization tests
@@ -2093,7 +2395,10 @@ mod admin_tests {
     #[test]
     fn test_initialize_sets_admin() {
         let (env, contract, admin) = setup();
-        assert_eq!(MarketContractClient::new(&env, &contract).get_admin(), admin);
+        assert_eq!(
+            MarketContractClient::new(&env, &contract).get_admin(),
+            admin
+        );
     }
 
     #[test]

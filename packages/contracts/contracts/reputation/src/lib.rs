@@ -23,10 +23,15 @@
 //! 3. **Interactions** – emit events (no external token calls in this contract).
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 use bluecollar_types::storage::extend_ttl;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
 };
 
 pub const VERSION: u32 = 1;
@@ -141,7 +146,9 @@ impl ReputationContract {
         // --- Effects ---
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().persistent().set(&DataKey::SchemaVersion, &1u32);
+        env.storage()
+            .persistent()
+            .set(&DataKey::SchemaVersion, &1u32);
 
         // Bootstrap ROLE_ADMIN for the initial admin.
         let role = Symbol::new(&env, ROLE_ADMIN);
@@ -244,7 +251,8 @@ impl ReputationContract {
     pub fn unpause(env: Env, caller: Address) {
         Self::require_role(&env, &Symbol::new(&env, ROLE_PAUSER), &caller);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("Unpaused"), caller), ());
+        env.events()
+            .publish((symbol_short!("Unpaused"), caller), ());
     }
 
     pub fn is_paused(env: Env) -> bool {

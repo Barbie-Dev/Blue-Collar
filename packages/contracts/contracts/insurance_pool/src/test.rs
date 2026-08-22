@@ -5,7 +5,7 @@ use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, BytesN, Env, String, Symbol, Vec,
+    Address, BytesN, Env, Symbol,
 };
 
 struct AuthFixture {
@@ -14,7 +14,6 @@ struct AuthFixture {
     admin: Address,
     pauser: Address,
     claims_mgr: Address,
-    upgrader: Address,
     stranger: Address,
     token: Address,
     member: Address,
@@ -46,12 +45,18 @@ impl AuthFixture {
         client.grant_role(&admin, &Symbol::new(&env, ROLE_UPGRADER), &upgrader);
 
         AuthFixture {
-            env, contract, admin, pauser, claims_mgr, upgrader, stranger,
-            token, member,
+            env,
+            contract,
+            admin,
+            pauser,
+            claims_mgr,
+            stranger,
+            token,
+            member,
         }
     }
 
-    fn client(&self) -> InsurancePoolContractClient {
+    fn client(&self) -> InsurancePoolContractClient<'_> {
         InsurancePoolContractClient::new(&self.env, &self.contract)
     }
 
@@ -67,11 +72,13 @@ impl AuthFixture {
     }
 
     fn file_claim(&self, claim_id: &str) {
-        self.client().file_claim(&self.member, &Symbol::new(&self.env, claim_id), &10_000);
+        self.client()
+            .file_claim(&self.member, &Symbol::new(&self.env, claim_id), &10_000);
     }
 
     fn approve_claim(&self, claim_id: &str) {
-        self.client().approve_claim(&self.claims_mgr, &Symbol::new(&self.env, claim_id));
+        self.client()
+            .approve_claim(&self.claims_mgr, &Symbol::new(&self.env, claim_id));
     }
 }
 
@@ -87,7 +94,8 @@ mod auth_failures {
     fn grant_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().grant_role(&f.stranger, &role, &Address::generate(&f.env));
+        f.client()
+            .grant_role(&f.stranger, &role, &Address::generate(&f.env));
     }
 
     #[test]
@@ -119,7 +127,8 @@ mod auth_failures {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("c1");
-        f.client().approve_claim(&f.stranger, &Symbol::new(&f.env, "c1"));
+        f.client()
+            .approve_claim(&f.stranger, &Symbol::new(&f.env, "c1"));
     }
 
     #[test]
@@ -128,7 +137,8 @@ mod auth_failures {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("c2");
-        f.client().reject_claim(&f.stranger, &Symbol::new(&f.env, "c2"));
+        f.client()
+            .reject_claim(&f.stranger, &Symbol::new(&f.env, "c2"));
     }
 
     #[test]
@@ -138,7 +148,8 @@ mod auth_failures {
         f.contribute();
         f.file_claim("c3");
         f.approve_claim("c3");
-        f.client().pay_claim(&f.stranger, &Symbol::new(&f.env, "c3"), &f.token);
+        f.client()
+            .pay_claim(&f.stranger, &Symbol::new(&f.env, "c3"), &f.token);
     }
 
     #[test]
@@ -177,7 +188,8 @@ mod paused_state {
     fn file_claim_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client().file_claim(&f.member, &Symbol::new(&f.env, "p1"), &100);
+        f.client()
+            .file_claim(&f.member, &Symbol::new(&f.env, "p1"), &100);
     }
 
     #[test]
@@ -187,7 +199,8 @@ mod paused_state {
         f.contribute();
         f.file_claim("p2");
         f.client().pause(&f.pauser);
-        f.client().approve_claim(&f.claims_mgr, &Symbol::new(&f.env, "p2"));
+        f.client()
+            .approve_claim(&f.claims_mgr, &Symbol::new(&f.env, "p2"));
     }
 
     #[test]
@@ -197,7 +210,8 @@ mod paused_state {
         f.contribute();
         f.file_claim("p3");
         f.client().pause(&f.pauser);
-        f.client().reject_claim(&f.claims_mgr, &Symbol::new(&f.env, "p3"));
+        f.client()
+            .reject_claim(&f.claims_mgr, &Symbol::new(&f.env, "p3"));
     }
 
     #[test]
@@ -208,7 +222,8 @@ mod paused_state {
         f.file_claim("p4");
         f.approve_claim("p4");
         f.client().pause(&f.pauser);
-        f.client().pay_claim(&f.claims_mgr, &Symbol::new(&f.env, "p4"), &f.token);
+        f.client()
+            .pay_claim(&f.claims_mgr, &Symbol::new(&f.env, "p4"), &f.token);
     }
 }
 
@@ -230,7 +245,8 @@ mod boundary {
     #[should_panic(expected = "Amount must be positive")]
     fn file_claim_zero_amount() {
         let f = AuthFixture::new();
-        f.client().file_claim(&f.member, &Symbol::new(&f.env, "z1"), &0);
+        f.client()
+            .file_claim(&f.member, &Symbol::new(&f.env, "z1"), &0);
     }
 
     #[test]

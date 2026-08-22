@@ -4,6 +4,11 @@
 //! Manages contributions, claims, and pool rebalancing.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Map, String,
@@ -213,7 +218,8 @@ impl InsurancePoolContract {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
         Self::require_role(&env, &admin_role, &caller);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((symbol_short!("Unpaused"), caller), ());
+        env.events()
+            .publish((symbol_short!("Unpaused"), caller), ());
     }
 
     /// Contribute to the insurance pool.
@@ -224,7 +230,12 @@ impl InsurancePoolContract {
         contributor.require_auth();
 
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer_from(&env.current_contract_address(), &contributor, &env.current_contract_address(), &amount);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &contributor,
+            &env.current_contract_address(),
+            &amount,
+        );
 
         let now = env.ledger().timestamp();
         let mut members = Self::load_pool_members(&env);
@@ -372,7 +383,11 @@ impl InsurancePoolContract {
         );
 
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&env.current_contract_address(), &claim.claimant, &claim.amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &claim.claimant,
+            &claim.amount,
+        );
 
         claim.status = String::from_slice(&env, "paid");
         env.storage()
@@ -439,7 +454,10 @@ impl InsurancePoolContract {
     pub fn rebalance_pool(env: Env, caller: Address, token: Address, new_premium_bps: u32) {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
         Self::require_role(&env, &admin_role, &caller);
-        assert!(new_premium_bps <= MAX_PREMIUM_BPS, "Premium exceeds maximum");
+        assert!(
+            new_premium_bps <= MAX_PREMIUM_BPS,
+            "Premium exceeds maximum"
+        );
 
         let mut stats: PoolStats = env
             .storage()
@@ -465,10 +483,8 @@ impl InsurancePoolContract {
     pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
         let upgrader_role = Symbol::new(&env, ROLE_UPGRADER);
         Self::require_role(&env, &upgrader_role, &caller);
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash);
-        env.events()
-            .publish((symbol_short!("Upgrade"), caller), ());
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.events().publish((symbol_short!("Upgrade"), caller), ());
     }
 }
 
@@ -490,7 +506,8 @@ mod tests {
         let contract = env.register_contract(None, InsurancePoolContract);
         let client = InsurancePoolContractClient::new(&env, &contract);
         client.initialize(&admin, &token, &100);
-        assert!(env
-            .as_contract(&contract, || { env.storage().instance().has(&DataKey::Admin) }));
+        assert!(env.as_contract(&contract, || {
+            env.storage().instance().has(&DataKey::Admin)
+        }));
     }
 }

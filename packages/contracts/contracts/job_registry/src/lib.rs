@@ -14,6 +14,11 @@
 //! `revoke_role`, `has_role`, `pause`, `unpause`, `is_paused`, `upgrade`.
 
 #![no_std]
+// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
+// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
+// event API changes the on-chain event ABI, so both are deliberately deferred to a
+// dedicated upgrade rather than mixed into unrelated changes.
+#![allow(deprecated)]
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, BytesN, Env, Symbol, Vec};
 
@@ -25,7 +30,7 @@ mod test;
 
 use logic::{
     do_assign_worker, do_cancel_job, do_complete_job, do_dispute_job, do_initialize, do_post_job,
-    require_not_paused, require_role, role_to_id, ROLE_ADMIN, ROLE_PAUSER, ROLE_UPGRADER,
+    require_role, role_to_id, ROLE_ADMIN, ROLE_PAUSER, ROLE_UPGRADER,
 };
 use storage::{
     is_paused, load_admin, load_job, load_job_list, load_poster_jobs, load_role_members,
