@@ -129,7 +129,7 @@ pub fn get_arbitrators(env: &Env) -> Vec<Address> {
     env.storage()
         .persistent()
         .get(&DataKey::Arbitrators)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write arbitrators list. Optimized to avoid redundant operations.
@@ -169,7 +169,7 @@ pub fn get_dispute_list(env: &Env) -> Vec<Symbol> {
     env.storage()
         .persistent()
         .get(&DataKey::DisputeList)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Append a dispute id to the ordered list and extend its TTL.
@@ -179,7 +179,7 @@ pub fn push_dispute_id(env: &Env, id: &Symbol) {
     let mut list = get_dispute_list(env);
 
     // Only push if not already present (idempotent and prevents duplicates)
-    if !list.iter().any(|x| x == id) {
+    if !list.iter().any(|x| x == *id) {
         list.push_back(id.clone());
         env.storage().persistent().set(&key, &list);
         // TTL extension immediately after write
