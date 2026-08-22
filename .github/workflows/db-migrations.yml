@@ -37,23 +37,19 @@ jobs:
         env:
           BASE_BRANCH: origin/main
 
+      # pnpm comes from the repo's `packageManager` field; the lockfile is v9 and
+      # cannot be read by older pnpm majors.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      - name: Install pnpm
-        run: npm install -g pnpm@8
-
-      - name: Cache node modules
-        uses: actions/cache@v4
-        with:
-          path: ~/.pnpm-store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          node-version: 22
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: packages/api
 
       - name: Generate Prisma client
         run: npx prisma generate
