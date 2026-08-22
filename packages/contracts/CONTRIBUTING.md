@@ -12,7 +12,7 @@ This guide is for contributors who want to work on the Rust-based Soroban smart 
   ```
 - Add the Soroban WASM target:
   ```bash
-  rustup target add wasm32-unknown-unknown
+  rustup target add wasm32v1-none
   ```
 - Install recommended Rust components:
   ```bash
@@ -44,7 +44,7 @@ make build-registry
 make build-market
 ```
 
-The wasm artifacts are written to `target/wasm32-unknown-unknown/release/`.
+The wasm artifacts are written to `target/wasm32v1-none/release/`.
 
 ## Test workflow
 

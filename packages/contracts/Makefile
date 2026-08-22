@@ -11,7 +11,7 @@ ADMIN         ?= $(error ADMIN is required)
 FEE_RECIPIENT ?= $(ADMIN)
 FEE_BPS       ?= 0
 
-WASM_DIR := target/wasm32-unknown-unknown/release
+WASM_DIR := target/wasm32v1-none/release
 
 .PHONY: build build-registry build-market test coverage \
         fuzz fuzz-proptest fuzz-register fuzz-tip fuzz-migrate \
@@ -28,10 +28,10 @@ WASM_DIR := target/wasm32-unknown-unknown/release
 build: build-registry build-market
 
 build-registry:
-	cargo build --release --target wasm32-unknown-unknown --package bluecollar-registry
+	cargo build --release --target wasm32v1-none --package bluecollar-registry
 
 build-market:
-	cargo build --release --target wasm32-unknown-unknown --package bluecollar-market
+	cargo build --release --target wasm32v1-none --package bluecollar-market
 
 # Run the full workspace test suite (unit + upgrade framework + property tests).
 test:

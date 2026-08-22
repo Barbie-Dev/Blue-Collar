@@ -26,7 +26,7 @@ releases (distinct from the WASM upgrade mechanics below).
 | Rust (stable) | **1.74.0** | Soroban SDK 26.x requires this edition and feature set |
 | soroban-sdk | **26.1.0** | All contracts pin to this version for ABI consistency |
 | Stellar CLI | **21.x** | Used for `stellar contract deploy / invoke / install` |
-| wasm32-unknown-unknown | (bundled with Rust) | Added via `rustup target add wasm32-unknown-unknown` |
+| wasm32v1-none | (bundled with Rust) | Added via `rustup target add wasm32v1-none` |
 
 > All member crates in the workspace declare `soroban-sdk = "26.1.0"` (except the
 > `fuzz` crate which also accepts `"26.1.0"`). Do **not** mix SDK versions across
@@ -39,7 +39,7 @@ releases (distinct from the WASM upgrade mechanics below).
 
 ```bash
 # Rust + wasm target
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 
 # Stellar CLI
 cargo install --locked stellar-cli
@@ -64,7 +64,7 @@ make build-registry
 make build-market
 ```
 
-WASM outputs land in `target/wasm32-unknown-unknown/release/`.
+WASM outputs land in `target/wasm32v1-none/release/`.
 
 ## Coverage
 
@@ -197,7 +197,7 @@ Upgrades preserve the contract ID and all storage.
 ```bash
 # 1. Install new WASM, get its hash
 stellar contract install \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_registry.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_registry.wasm \
   --source <admin-key> \
   --network testnet
 # → <new_wasm_hash>
