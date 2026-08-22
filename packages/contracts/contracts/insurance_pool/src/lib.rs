@@ -6,7 +6,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Map, String,
     Symbol, Vec,
 };
 
@@ -84,7 +84,7 @@ pub enum DataKey {
     Paused,
     /// Persistent storage — role members.
     RoleMembers(Symbol),
-    /// Persistent storage — pool members.
+    /// Persistent storage — pool members, keyed by member address.
     PoolMembers,
     /// Persistent storage — pool statistics.
     PoolStats(Address),
@@ -226,31 +226,21 @@ impl InsurancePoolContract {
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(&env.current_contract_address(), &contributor, &env.current_contract_address(), &amount);
 
-        let mut members: Vec<PoolMember> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::PoolMembers)
-            .unwrap_or(Vec::new(&env));
-
-        let mut found = false;
-        for i in 0..members.len() {
-            let mut member = members.get(i).unwrap();
-            if member.address == contributor {
-                member.contribution = member.contribution.saturating_add(amount);
-                member.last_contribution_at = env.ledger().timestamp();
-                members.set(i, member);
-                found = true;
-                break;
+        let now = env.ledger().timestamp();
+        let mut members = Self::load_pool_members(&env);
+        let member = match members.get(contributor.clone()) {
+            Some(mut existing) => {
+                existing.contribution = existing.contribution.saturating_add(amount);
+                existing.last_contribution_at = now;
+                existing
             }
-        }
-
-        if !found {
-            members.push_back(PoolMember {
+            None => PoolMember {
                 address: contributor.clone(),
                 contribution: amount,
-                last_contribution_at: env.ledger().timestamp(),
-            });
-        }
+                last_contribution_at: now,
+            },
+        };
+        members.set(contributor.clone(), member);
 
         env.storage()
             .persistent()
@@ -419,12 +409,22 @@ impl InsurancePoolContract {
             })
     }
 
-    /// Get pool members.
+    /// Get every pool member.
     pub fn get_pool_members(env: Env) -> Vec<PoolMember> {
+        Self::load_pool_members(&env).values()
+    }
+
+    /// Get a single pool member, or `None` if the address never contributed.
+    pub fn get_pool_member(env: Env, address: Address) -> Option<PoolMember> {
+        Self::load_pool_members(&env).get(address)
+    }
+
+    /// Read the member map, defaulting to an empty map.
+    fn load_pool_members(env: &Env) -> Map<Address, PoolMember> {
         env.storage()
             .persistent()
             .get(&DataKey::PoolMembers)
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Map::new(env))
     }
 
     /// Get a specific claim.

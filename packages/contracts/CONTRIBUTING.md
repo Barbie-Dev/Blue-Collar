@@ -139,6 +139,9 @@ The Soroban contracts store worker entries with an on-chain TTL measured in ledg
 
 - `TTL_EXTEND_TO` is approximately `535_000` ledgers (~1 year).
 - `TTL_THRESHOLD` is approximately `267_500` ledgers (~6 months).
+- Both constants and the `extend_ttl(&env, &key)` helper live in
+  `bluecollar_types::storage`. Call that helper instead of writing the
+  `env.storage().persistent().extend_ttl(...)` sequence in a contract.
 - Every write extends the stored entry TTL automatically.
 - A public extension entry exists so anyone can refresh a worker record.
 

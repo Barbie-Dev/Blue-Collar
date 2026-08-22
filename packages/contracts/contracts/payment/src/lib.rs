@@ -22,17 +22,12 @@
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec};
-use bluecollar_types::ContractError;
+use bluecollar_types::{storage::extend_ttl, ContractError};
 
 /// Maximum protocol fee: 500 bps = 5 %.
 pub const MAX_FEE_BPS: u32 = 500;
 
 pub const VERSION: u32 = 1;
-
-/// Approximate TTL extension target (~1 year at 5 s/ledger).
-const TTL_EXTEND_TO: u32 = 535_000;
-/// Extend TTL only when it drops below this threshold (~6 months).
-const TTL_THRESHOLD: u32 = 267_500;
 
 // =============================================================================
 // Roles
@@ -217,12 +212,7 @@ impl PaymentContract {
     }
 
     fn extend_payment_ttl(env: &Env, id: &Symbol) {
-        let key = DataKey::Payment(id.clone());
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-        }
+        extend_ttl(env, &DataKey::Payment(id.clone()));
     }
 
     // -------------------------------------------------------------------------

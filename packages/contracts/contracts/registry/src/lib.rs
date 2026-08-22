@@ -19,6 +19,7 @@
 
 #![no_std]
 
+use bluecollar_types::storage::extend_ttl;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String,
     Symbol, Vec,
@@ -26,11 +27,6 @@ use soroban_sdk::{
 
 /// Event schema version — bump when adding/removing/renaming events.
 pub const VERSION: u32 = 1;
-
-/// Approximate TTL extension target (~1 year at 5 s/ledger).
-const TTL_EXTEND_TO: u32 = 535_000;
-/// Extend TTL only when it drops below this threshold (~6 months).
-const TTL_THRESHOLD: u32 = 267_500;
 
 // =============================================================================
 // Gas Optimization Constants (#351)
@@ -798,7 +794,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     /// Register a new worker on-chain. Caller must be an authorised curator.
     ///
     /// Automatically extends the TTL of the new worker entry and the worker list
-    /// to [`TTL_EXTEND_TO`] ledgers if below [`TTL_THRESHOLD`].
+    /// via [`extend_ttl`].
     ///
     /// # Parameters
     /// - `id`: Unique worker identifier (must not already exist).
@@ -867,7 +863,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
 
         let key = DataKey::Worker(id.clone());
         env.storage().persistent().set(&key, &worker);
-        env.storage().persistent().extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &key);
 
         let list_key = DataKey::WorkerList;
         let mut list: Vec<Symbol> = env
@@ -877,7 +873,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             .unwrap_or(Vec::new(&env));
         list.push_back(id.clone());
         env.storage().persistent().set(&list_key, &list);
-        env.storage().persistent().extend_ttl(&list_key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &list_key);
 
         // #529: Maintain WorkerCount for efficient pagination.
         let count: u32 = env
@@ -1146,7 +1142,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
     pub fn extend_worker_ttl(env: Env, id: Symbol) {
         let key = DataKey::Worker(id.clone());
         assert!(env.storage().persistent().has(&key), "Worker not found");
-        env.storage().persistent().extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &key);
     }
 
     /// Returns `true` if the contract has been initialised.
@@ -1587,7 +1583,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.review_count = review_count;
         worker.avg_rating = avg_rating;
         env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
-        env.storage().persistent().extend_ttl(&DataKey::Worker(id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &DataKey::Worker(id.clone()));
 
         env.events().publish((symbol_short!("RevUpd"), id), (review_count, avg_rating));
     }
@@ -1637,7 +1633,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         };
 
         env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
-        env.storage().persistent().extend_ttl(&DataKey::Worker(id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &DataKey::Worker(id.clone()));
 
         env.events().publish((symbol_short!("SubUpd"), id), (tier, expires_at));
     }
@@ -1672,7 +1668,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         worker.subscription.last_renewed_at = now;
 
         env.storage().persistent().set(&DataKey::Worker(id.clone()), &worker);
-        env.storage().persistent().extend_ttl(&DataKey::Worker(id.clone()), TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &DataKey::Worker(id.clone()));
 
         env.events().publish((symbol_short!("SubRnw"), id), new_expires_at);
     }
@@ -1999,7 +1995,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
             };
 
             env.storage().persistent().set(&key, &worker);
-        env.storage().persistent().extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+            extend_ttl(&env, &key);
             list.push_back(id.clone());
 
             env.events().publish(
@@ -2011,7 +2007,7 @@ fn role_to_id_with_env(env: &Env, role: &Symbol) -> u64 {
         }
 
         env.storage().persistent().set(&list_key, &list);
-        env.storage().persistent().extend_ttl(&list_key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(&env, &list_key);
 
         results
     }

@@ -3,7 +3,7 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, BytesN, Env, String, Symbol, Vec,
 };
@@ -56,9 +56,14 @@ impl AuthFixture {
     }
 
     fn contribute(&self) {
-        let token_client = TokenClient::new(&self.env, &self.token);
-        token_client.approve(&self.member, &self.contract, &100_000, &200_000);
-        self.client().contribute(&self.member, &self.token, &100_000);
+        self.contribute_from(&self.member, 100_000);
+    }
+
+    /// Fund `who`, approve the pool as spender, and contribute `amount`.
+    fn contribute_from(&self, who: &Address, amount: i128) {
+        StellarAssetClient::new(&self.env, &self.token).mint(who, &amount);
+        TokenClient::new(&self.env, &self.token).approve(who, &self.contract, &amount, &200_000);
+        self.client().contribute(who, &self.token, &amount);
     }
 
     fn file_claim(&self, claim_id: &str) {
@@ -259,5 +264,85 @@ mod boundary {
         f.client().rebalance_pool(&f.admin, &f.token, &0);
         let stats = f.client().get_pool_stats(&f.token);
         assert_eq!(stats.premium_bps, 0);
+    }
+}
+
+// =============================================================================
+// Contribution tests (member map storage)
+// =============================================================================
+
+mod contributions {
+    use super::*;
+
+    fn member_of(f: &AuthFixture, who: &Address) -> PoolMember {
+        f.client().get_pool_member(who).expect("member recorded")
+    }
+
+    #[test]
+    fn first_contribution_records_member() {
+        let f = AuthFixture::new();
+        f.env.ledger().set_timestamp(1_000);
+
+        f.contribute_from(&f.member, 50_000);
+
+        let member = member_of(&f, &f.member);
+        assert_eq!(member.address, f.member);
+        assert_eq!(member.contribution, 50_000);
+        assert_eq!(member.last_contribution_at, 1_000);
+        assert_eq!(f.client().get_pool_members().len(), 1);
+
+        let stats = f.client().get_pool_stats(&f.token);
+        assert_eq!(stats.total_contributions, 50_000);
+        assert_eq!(stats.total_balance, 50_000);
+    }
+
+    #[test]
+    fn repeat_contribution_accumulates_into_one_entry() {
+        let f = AuthFixture::new();
+        f.env.ledger().set_timestamp(1_000);
+        f.contribute_from(&f.member, 50_000);
+
+        f.env.ledger().set_timestamp(2_000);
+        f.contribute_from(&f.member, 25_000);
+
+        let member = member_of(&f, &f.member);
+        assert_eq!(member.contribution, 75_000);
+        assert_eq!(member.last_contribution_at, 2_000);
+        assert_eq!(
+            f.client().get_pool_members().len(),
+            1,
+            "repeat contributions must not create a second member entry"
+        );
+
+        let stats = f.client().get_pool_stats(&f.token);
+        assert_eq!(stats.total_contributions, 75_000);
+    }
+
+    #[test]
+    fn multiple_members_are_tracked_independently() {
+        let f = AuthFixture::new();
+        let second = Address::generate(&f.env);
+        let third = Address::generate(&f.env);
+
+        f.contribute_from(&f.member, 10_000);
+        f.contribute_from(&second, 20_000);
+        f.contribute_from(&third, 30_000);
+        f.contribute_from(&second, 5_000);
+
+        assert_eq!(member_of(&f, &f.member).contribution, 10_000);
+        assert_eq!(member_of(&f, &second).contribution, 25_000);
+        assert_eq!(member_of(&f, &third).contribution, 30_000);
+        assert_eq!(f.client().get_pool_members().len(), 3);
+
+        let stats = f.client().get_pool_stats(&f.token);
+        assert_eq!(stats.total_contributions, 65_000);
+    }
+
+    #[test]
+    fn unknown_address_has_no_member_entry() {
+        let f = AuthFixture::new();
+        f.contribute_from(&f.member, 10_000);
+
+        assert!(f.client().get_pool_member(&f.stranger).is_none());
     }
 }
