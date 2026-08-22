@@ -1,22 +1,6 @@
 // ─── Core domain types ────────────────────────────────────────────────────────
 // ─── API Response Contracts ───────────────────────────────────────────────────
 
-/** Standard API envelope returned by all endpoints. */
-export interface ApiResponse<T = undefined> {
-  status: "success" | "error";
-  message: string;
-  code: number;
-  data?: T;
-  token?: string;
-}
-
-export interface Meta {
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
-}
-
 /** Paginated list response. */
 export interface PaginatedResult<T> {
   data: T[];
@@ -91,20 +75,12 @@ export interface Worker {
   locationId?: string | null;
   walletAddress?: string | null;
   categoryId?: string;
-  category?: Category;
+  category: Category;
   averageRating?: number | null;
   reviewCount?: number;
   portfolioImages?: PortfolioImage[];
   createdAt?: string | Date;
   updatedAt?: string | Date;
-}
-
-  locationId?: string | null;
-  walletAddress?: string | null;
-  category: Category;
-  averageRating?: number | null;
-  reviewCount?: number;
-  portfolioImages?: PortfolioImage[];
 }
 
 export interface CreateWorkerDTO {
@@ -173,12 +149,13 @@ export interface RatingDistributionEntry {
 // ─── API response wrappers ────────────────────────────────────────────────────
 
 /** Standard API envelope returned by all endpoints. */
-export interface ApiResponse<T> {
-  data: T;
-  meta?: Meta;
-  status: string;
+export interface ApiResponse<T = undefined> {
+  status: "success" | "error";
+  message: string;
   code: number;
-  message?: string;
+  data?: T;
+  meta?: Meta;
+  token?: string;
 }
 
 /** Paginated list response. */
@@ -245,15 +222,6 @@ export interface SdkConfig {
   network: 'testnet' | 'mainnet';
 }
 
-// ─── Audit Log ──────────────────────────────────────────────────────────────
-
-export interface AuditLogEntry {
-  id: string;
-  action: string;
-  userId: string;
-  metadata: Record<string, any>;
-  createdAt: string;
-}
 export interface CreateReviewDTO {
   rating: number;
   comment?: string;
