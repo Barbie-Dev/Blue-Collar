@@ -99,14 +99,6 @@ export interface Worker {
   updatedAt?: string | Date;
 }
 
-  locationId?: string | null;
-  walletAddress?: string | null;
-  category: Category;
-  averageRating?: number | null;
-  reviewCount?: number;
-  portfolioImages?: PortfolioImage[];
-}
-
 export interface CreateWorkerDTO {
   name: string;
   categoryId: string;
