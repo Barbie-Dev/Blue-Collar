@@ -11,6 +11,7 @@ name = "bluecollar_integration"
 
 [dependencies]
 soroban-sdk = { version = "26.1.0", features = ["testutils"] }
+bluecollar-types    = { path = "../types" }
 bluecollar-registry = { path = "../registry" }
 bluecollar-market   = { path = "../market" }
 

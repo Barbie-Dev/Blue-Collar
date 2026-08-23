@@ -33,7 +33,7 @@ pub enum EscrowState {
 
 /// On-chain escrow record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EscrowRecord {
     /// Unique escrow identifier.
     pub id: Symbol,
@@ -80,9 +80,7 @@ pub enum DataKey {
 
 /// Load an escrow record by id. Returns `None` if not found.
 pub fn load_escrow(env: &Env, id: &Symbol) -> Option<EscrowRecord> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Escrow(id.clone()))
+    env.storage().persistent().get(&DataKey::Escrow(id.clone()))
 }
 
 /// Write an escrow record and extend its TTL.
@@ -97,13 +95,13 @@ pub fn save_escrow(env: &Env, record: &EscrowRecord) {
 }
 
 /// Extend the TTL on an escrow entry.
-/// Note: Direct TTL extension without has() check for efficiency.
 pub fn extend_escrow_ttl(env: &Env, id: &Symbol) {
     let key = DataKey::Escrow(id.clone());
-    // Attempt TTL extension directly. Soroban SDK handles non-existent keys gracefully.
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    }
 }
 
 /// Load the global escrow id list.
@@ -111,7 +109,7 @@ pub fn load_escrow_list(env: &Env) -> Vec<Symbol> {
     env.storage()
         .persistent()
         .get(&DataKey::EscrowList)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write the global escrow id list and extend its TTL.
@@ -146,7 +144,7 @@ pub fn load_role_members(env: &Env, role_id: u64) -> Vec<Address> {
     env.storage()
         .persistent()
         .get(&DataKey::RoleMembers(role_id))
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write the role member list and extend its TTL.

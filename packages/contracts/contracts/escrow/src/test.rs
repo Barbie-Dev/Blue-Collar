@@ -6,7 +6,7 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Symbol,
 };
@@ -44,16 +44,9 @@ fn deploy_and_init<'a>(
 }
 
 fn set_time(env: &Env, ts: u64) {
-    env.ledger().set(LedgerInfo {
-        timestamp: ts,
-        protocol_version: 22,
-        sequence_number: 100,
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: 1_000_000,
-    });
+    let mut info = env.ledger().get();
+    info.timestamp = ts;
+    env.ledger().set(info);
 }
 
 // ---------------------------------------------------------------------------
@@ -69,11 +62,13 @@ fn test_initialize_sets_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Already initialized")]
 fn test_initialize_twice_panics() {
     let (env, admin, _, _, _, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
-    client.initialize(&admin);
+    assert_eq!(
+        client.try_initialize(&admin),
+        Err(Ok(ContractError::AlreadyInitialized))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -98,46 +93,52 @@ fn test_create_escrow_success() {
 }
 
 #[test]
-#[should_panic(expected = "amount must be positive")]
 fn test_create_escrow_zero_amount_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
     set_time(&env, 1_000);
-    client.create_escrow(
-        &depositor,
-        &beneficiary,
-        &token,
-        &Symbol::new(&env, "e1"),
-        &0,
-        &5_000,
+    assert_eq!(
+        client.try_create_escrow(
+            &depositor,
+            &beneficiary,
+            &token,
+            &Symbol::new(&env, "e1"),
+            &0,
+            &5_000,
+        ),
+        Err(Ok(ContractError::AmountMustBePositive))
     );
 }
 
 #[test]
-#[should_panic(expected = "expiry must be in future")]
 fn test_create_escrow_past_expiry_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
     set_time(&env, 5_000);
-    client.create_escrow(
-        &depositor,
-        &beneficiary,
-        &token,
-        &Symbol::new(&env, "e1"),
-        &1_000,
-        &1_000, // expiry in the past
+    assert_eq!(
+        client.try_create_escrow(
+            &depositor,
+            &beneficiary,
+            &token,
+            &Symbol::new(&env, "e1"),
+            &1_000,
+            &1_000, // expiry in the past
+        ),
+        Err(Ok(ContractError::ExpiryMustBeInFuture))
     );
 }
 
 #[test]
-#[should_panic(expected = "Escrow already exists")]
 fn test_create_escrow_duplicate_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
     set_time(&env, 1_000);
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &1_000, &9_000);
-    client.create_escrow(&depositor, &beneficiary, &token, &id, &1_000, &9_000);
+    assert_eq!(
+        client.try_create_escrow(&depositor, &beneficiary, &token, &id, &1_000, &9_000),
+        Err(Ok(ContractError::EscrowAlreadyExists))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +174,6 @@ fn test_release_escrow_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Not authorized")]
 fn test_release_escrow_by_stranger_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -182,11 +182,13 @@ fn test_release_escrow_by_stranger_panics() {
     let stranger = Address::generate(&env);
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &5_000, &9_000);
-    client.release_escrow(&stranger, &id);
+    assert_eq!(
+        client.try_release_escrow(&stranger, &id),
+        Err(Ok(ContractError::NotAuthorized))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Escrow not active")]
 fn test_release_escrow_already_released_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -195,7 +197,10 @@ fn test_release_escrow_already_released_panics() {
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &5_000, &9_000);
     client.release_escrow(&depositor, &id);
-    client.release_escrow(&depositor, &id);
+    assert_eq!(
+        client.try_release_escrow(&depositor, &id),
+        Err(Ok(ContractError::EscrowNotActive))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +220,10 @@ fn test_cancel_escrow_by_admin_before_expiry() {
     let before = token_client.balance(&depositor);
     client.cancel_escrow(&admin, &id);
     assert_eq!(token_client.balance(&depositor), before + 3_000);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]
@@ -230,11 +238,13 @@ fn test_cancel_escrow_by_depositor_after_expiry() {
     // Advance past expiry
     set_time(&env, 3_000);
     client.cancel_escrow(&depositor, &id);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]
-#[should_panic(expected = "Not authorized")]
 fn test_cancel_escrow_by_depositor_before_expiry_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -242,7 +252,10 @@ fn test_cancel_escrow_by_depositor_before_expiry_panics() {
 
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &3_000, &9_000);
-    client.cancel_escrow(&depositor, &id); // before expiry — must fail
+    assert_eq!(
+        client.try_cancel_escrow(&depositor, &id),
+        Err(Ok(ContractError::NotAuthorized))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +287,6 @@ fn test_dispute_by_beneficiary() {
 }
 
 #[test]
-#[should_panic(expected = "Not a party")]
 fn test_dispute_by_stranger_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -283,7 +295,10 @@ fn test_dispute_by_stranger_panics() {
     let stranger = Address::generate(&env);
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &5_000, &9_000);
-    client.dispute_escrow(&stranger, &id);
+    assert_eq!(
+        client.try_dispute_escrow(&stranger, &id),
+        Err(Ok(ContractError::NotAParty))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -321,11 +336,13 @@ fn test_resolve_dispute_refund_to_depositor() {
     client.resolve_dispute(&admin, &id, &false);
 
     assert_eq!(token_client.balance(&depositor), before + 6_000);
-    assert_eq!(client.get_escrow(&id).state, storage::EscrowState::Cancelled);
+    assert_eq!(
+        client.get_escrow(&id).state,
+        storage::EscrowState::Cancelled
+    );
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_resolve_dispute_unauthorized_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -335,11 +352,13 @@ fn test_resolve_dispute_unauthorized_panics() {
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &5_000, &9_000);
     client.dispute_escrow(&depositor, &id);
-    client.resolve_dispute(&stranger, &id, &true);
+    assert_eq!(
+        client.try_resolve_dispute(&stranger, &id, &true),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Escrow not disputed")]
 fn test_resolve_non_disputed_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
@@ -348,11 +367,13 @@ fn test_resolve_non_disputed_panics() {
     let id = Symbol::new(&env, "esc1");
     client.create_escrow(&depositor, &beneficiary, &token, &id, &5_000, &9_000);
     // Not disputed yet — must fail
-    client.resolve_dispute(&admin, &id, &true);
+    assert_eq!(
+        client.try_resolve_dispute(&admin, &id, &true),
+        Err(Ok(ContractError::EscrowNotDisputed))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_resolve_dispute_while_paused_panics() {
     // Regression test: every other fund-moving entry point (create/release/
     // cancel/dispute) checks require_not_paused, but resolve_dispute did
@@ -367,7 +388,10 @@ fn test_resolve_dispute_while_paused_panics() {
     client.dispute_escrow(&depositor, &id);
 
     client.pause(&admin);
-    client.resolve_dispute(&admin, &id, &true);
+    assert_eq!(
+        client.try_resolve_dispute(&admin, &id, &true),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -405,20 +429,22 @@ fn test_list_escrows() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_create_while_paused_panics() {
     let (env, admin, depositor, beneficiary, token, contract_id) = setup_env();
     let client = deploy_and_init(&env, &admin, &contract_id);
     set_time(&env, 1_000);
 
     client.pause(&admin);
-    client.create_escrow(
-        &depositor,
-        &beneficiary,
-        &token,
-        &Symbol::new(&env, "e1"),
-        &1_000,
-        &9_000,
+    assert_eq!(
+        client.try_create_escrow(
+            &depositor,
+            &beneficiary,
+            &token,
+            &Symbol::new(&env, "e1"),
+            &1_000,
+            &9_000,
+        ),
+        Err(Ok(ContractError::ContractIsPaused))
     );
 }
 

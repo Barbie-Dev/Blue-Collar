@@ -39,7 +39,7 @@ pub enum DisputeOutcome {
 
 /// On-chain dispute record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Dispute {
     /// Unique identifier.
     pub id: Symbol,
@@ -93,12 +93,12 @@ pub fn has_admin(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Admin)
 }
 
-/// Get the admin address. Panics if not initialized.
-pub fn get_admin(env: &Env) -> Address {
+/// Get the admin address.
+pub fn get_admin(env: &Env) -> Result<Address, bluecollar_types::ContractError> {
     env.storage()
         .instance()
         .get(&DataKey::Admin)
-        .expect("Not initialized")
+        .ok_or(bluecollar_types::ContractError::NotInitialized)
 }
 
 /// Set the admin address. Instance storage doesn't use TTL, so no extension needed.
@@ -129,7 +129,7 @@ pub fn get_arbitrators(env: &Env) -> Vec<Address> {
     env.storage()
         .persistent()
         .get(&DataKey::Arbitrators)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Write arbitrators list. Optimized to avoid redundant operations.
@@ -147,11 +147,15 @@ pub fn set_arbitrators(env: &Env, arbitrators: &Vec<Address>) {
 // =============================================================================
 
 pub fn has_dispute(env: &Env, id: &Symbol) -> bool {
-    env.storage().persistent().has(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .has(&DataKey::Dispute(id.clone()))
 }
 
 pub fn get_dispute(env: &Env, id: &Symbol) -> Option<Dispute> {
-    env.storage().persistent().get(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Dispute(id.clone()))
 }
 
 /// Persist a dispute record and extend its TTL.
@@ -169,7 +173,7 @@ pub fn get_dispute_list(env: &Env) -> Vec<Symbol> {
     env.storage()
         .persistent()
         .get(&DataKey::DisputeList)
-        .unwrap_or_else(|_| Vec::new(env))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Append a dispute id to the ordered list and extend its TTL.
@@ -179,7 +183,7 @@ pub fn push_dispute_id(env: &Env, id: &Symbol) {
     let mut list = get_dispute_list(env);
 
     // Only push if not already present (idempotent and prevents duplicates)
-    if !list.iter().any(|x| x == id) {
+    if !list.iter().any(|x| x == *id) {
         list.push_back(id.clone());
         env.storage().persistent().set(&key, &list);
         // TTL extension immediately after write

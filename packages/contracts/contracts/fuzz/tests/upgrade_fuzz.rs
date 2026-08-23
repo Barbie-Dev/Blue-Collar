@@ -12,8 +12,8 @@ use soroban_sdk::{
     Address, BytesN, Env, String as SorobanString, Symbol,
 };
 
-use bluecollar_registry::{RegistryContract, RegistryContractClient};
 use bluecollar_market::{MarketContract, MarketContractClient};
+use bluecollar_registry::{RegistryContract, RegistryContractClient};
 
 fn arb_worker_id() -> impl Strategy<Value = String> {
     "[a-z0-9]{1,16}".prop_map(|s| s)
