@@ -13,7 +13,15 @@ export type {
   LoginForm,
   RegisterForm,
   WorkerForm,
-  AuditLogEntry
+  AuditLogEntry,
+  Job,
+  JobApplication,
+  Conversation,
+  Message,
+  AppNotification,
+  NotificationType,
+  TipDTO,
+  WorkerAnalytics
 } from '@bluecollar/types'
 
 // ─── Analytics types (app-only views) ────────────────────────────────────────
@@ -175,4 +183,20 @@ export interface InvoiceLineItem {
 export interface InvoiceParty {
   id: string;
   name: string;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  status: InvoiceStatus;
+  issuedAt: string;
+  dueAt?: string | null;
+  currency: string;
+  worker: InvoiceParty;
+  client: InvoiceParty;
+  lineItems: InvoiceLineItem[];
+  /** Platform fee in the invoice's currency. */
+  platformFee: number;
+  notes?: string | null;
+  transactionHash?: string | null;
 }
