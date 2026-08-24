@@ -153,6 +153,60 @@ The Soroban contracts store worker entries with an on-chain TTL measured in ledg
 - Use `BytesN<32>` for fixed-size hashes and WASM hashes.
 - Prefer the contract client wrappers (`RegistryContractClient`, `MarketContractClient`) in tests instead of raw call APIs.
 
+## Error Handling
+
+All contract entrypoints **must** return `Result<T, ContractError>` where
+`ContractError` is the shared `#[contracterror]` enum defined in the
+`bluecollar-types` crate (`contracts/types/src/errors.rs`).
+
+### Rules
+
+1. **No string-based panics in entrypoints.**
+   `.expect("…")`, `panic!("…")`, and `assert!(…, "…")` are **forbidden** in
+   any function exposed via `#[contractimpl]`. Use typed error propagation
+   instead:
+
+   ```rust
+   // ❌ Don't do this
+   let worker = storage.get(&key).expect("Worker not found");
+
+   // ✅ Do this
+   let worker = storage.get(&key).ok_or(ContractError::WorkerNotFound)?;
+   ```
+
+2. **Use `?` propagation.**
+   Chain `.ok_or(ContractError::Variant)?` for `Option` values and
+   `return Err(ContractError::Variant)` for explicit guard clauses.
+
+3. **Reserve `panic!` / `unreachable!` for true invariants only.**
+   If a code path is logically impossible (e.g. after an exhaustive match),
+   `unreachable!()` is acceptable. Every other error condition must surface a
+   `ContractError` variant so callers can handle it programmatically.
+
+4. **Add new variants with explicit discriminants.**
+   When you need a new error, append a variant to the `ContractError` enum with
+   the next available `u32` discriminant. Never reorder or remove existing
+   variants—this would break on-chain ABI compatibility.
+
+5. **Test error paths with `try_*` methods.**
+   The Soroban SDK generates `try_<method>` client methods that return
+   `Result<Result<T, ContractError>, …>`. Use these in tests instead of
+   `#[should_panic]`:
+
+   ```rust
+   // ❌ Don't do this
+   #[test]
+   #[should_panic(expected = "Worker not found")]
+   fn test_missing_worker() { … }
+
+   // ✅ Do this
+   #[test]
+   fn test_missing_worker() {
+       let res = client.try_get_worker(&bad_id);
+       assert_eq!(res, Err(Ok(ContractError::WorkerNotFound)));
+   }
+   ```
+
 ## Notes
 
 - Do not edit generated WASM artifacts in source control.

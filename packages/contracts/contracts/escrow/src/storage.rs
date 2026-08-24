@@ -11,6 +11,8 @@ use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 // TTL Constants
 // =============================================================================
 
+pub use bluecollar_types::storage::{TTL_EXTEND_TO, TTL_THRESHOLD};
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -31,7 +33,7 @@ pub enum EscrowState {
 
 /// On-chain escrow record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EscrowRecord {
     /// Unique escrow identifier.
     pub id: Symbol,
@@ -82,13 +84,14 @@ pub fn load_escrow(env: &Env, id: &Symbol) -> Option<EscrowRecord> {
 }
 
 /// Write an escrow record and extend its TTL.
+/// Optimized: combines write and TTL extension into single operation.
 pub fn save_escrow(env: &Env, record: &EscrowRecord) {
     let key = DataKey::Escrow(record.id.clone());
     env.storage().persistent().set(&key, record);
     extend_ttl(env, &key);
 }
 
-/// Extend the TTL on an escrow entry.
+/// Extend the TTL on an escrow entry. A missing entry is a no-op.
 pub fn extend_escrow_ttl(env: &Env, id: &Symbol) {
     extend_ttl(env, &DataKey::Escrow(id.clone()));
 }

@@ -14,6 +14,7 @@ struct AuthFixture {
     admin: Address,
     pauser: Address,
     fee_mgr: Address,
+    upgrader: Address,
     stranger: Address,
     token: Address,
     recipient_a: Address,
@@ -68,6 +69,7 @@ impl AuthFixture {
             admin,
             pauser,
             fee_mgr,
+            upgrader,
             stranger,
             token,
             recipient_a,
@@ -75,7 +77,7 @@ impl AuthFixture {
         }
     }
 
-    fn client(&self) -> FeeDistributionContractClient<'_> {
+    fn client(&self) -> FeeDistributionContractClient {
         FeeDistributionContractClient::new(&self.env, &self.contract)
     }
 
@@ -96,66 +98,82 @@ mod auth_failures {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn grant_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client()
-            .grant_role(&f.stranger, &role, &Address::generate(&f.env));
+        assert_eq!(
+            f.client()
+                .try_grant_role(&f.stranger, &role, &Address::generate(&f.env)),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn revoke_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().revoke_role(&f.stranger, &role, &f.pauser);
+        assert_eq!(
+            f.client().try_revoke_role(&f.stranger, &role, &f.pauser),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn pause_requires_pauser() {
         let f = AuthFixture::new();
-        f.client().pause(&f.stranger);
+        assert_eq!(
+            f.client().try_pause(&f.stranger),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn unpause_requires_admin() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client().unpause(&f.stranger);
+        assert_eq!(
+            f.client().try_unpause(&f.stranger),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn set_fee_recipients_requires_fee_mgr() {
         let f = AuthFixture::new();
         let recipients = Vec::new(&f.env);
-        f.client().set_fee_recipients(&f.stranger, &recipients);
+        assert_eq!(
+            f.client().try_set_fee_recipients(&f.stranger, &recipients),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn distribute_fees_requires_fee_mgr() {
         let f = AuthFixture::new();
         f.collect_some_fees();
-        f.client().distribute_fees(&f.stranger, &f.token);
+        assert_eq!(
+            f.client().try_distribute_fees(&f.stranger, &f.token),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn withdraw_fees_requires_admin() {
         let f = AuthFixture::new();
-        f.client().withdraw_fees(&f.stranger, &f.token, &100);
+        assert_eq!(
+            f.client().try_withdraw_fees(&f.stranger, &f.token, &100),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn upgrade_requires_upgrader() {
         let f = AuthFixture::new();
         let hash = BytesN::from_array(&f.env, &[1u8; 32]);
-        f.client().upgrade(&f.stranger, &hash);
+        assert_eq!(
+            f.client().try_upgrade(&f.stranger, &hash),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 }
 
@@ -167,48 +185,58 @@ mod paused_state {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn grant_role_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client()
-            .grant_role(&f.admin, &role, &Address::generate(&f.env));
+        assert_eq!(
+            f.client()
+                .try_grant_role(&f.admin, &role, &Address::generate(&f.env)),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn revoke_role_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().revoke_role(&f.admin, &role, &f.pauser);
+        assert_eq!(
+            f.client().try_revoke_role(&f.admin, &role, &f.pauser),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn set_fee_recipients_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
         let recipients = Vec::new(&f.env);
-        f.client().set_fee_recipients(&f.fee_mgr, &recipients);
+        assert_eq!(
+            f.client().try_set_fee_recipients(&f.fee_mgr, &recipients),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn distribute_fees_while_paused() {
         let f = AuthFixture::new();
         f.collect_some_fees();
         f.client().pause(&f.pauser);
-        f.client().distribute_fees(&f.fee_mgr, &f.token);
+        assert_eq!(
+            f.client().try_distribute_fees(&f.fee_mgr, &f.token),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn collect_fees_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client().collect_fees(&f.admin, &f.token, &100);
+        assert_eq!(
+            f.client().try_collect_fees(&f.admin, &f.token, &100),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 }
 
@@ -220,21 +248,24 @@ mod boundary {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Amount must be positive")]
     fn collect_fees_zero_amount() {
         let f = AuthFixture::new();
-        f.client().collect_fees(&f.admin, &f.token, &0);
+        assert_eq!(
+            f.client().try_collect_fees(&f.admin, &f.token, &0),
+            Err(Ok(ContractError::AmountMustBePositive))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Amount must be positive")]
     fn withdraw_fees_zero_amount() {
         let f = AuthFixture::new();
-        f.client().withdraw_fees(&f.admin, &f.token, &0);
+        assert_eq!(
+            f.client().try_withdraw_fees(&f.admin, &f.token, &0),
+            Err(Ok(ContractError::AmountMustBePositive))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Percentages must sum to 100%")]
     fn set_recipients_total_under_100() {
         let f = AuthFixture::new();
         let recipients = Vec::from_array(
@@ -250,11 +281,13 @@ mod boundary {
                 },
             ],
         );
-        f.client().set_fee_recipients(&f.fee_mgr, &recipients);
+        assert_eq!(
+            f.client().try_set_fee_recipients(&f.fee_mgr, &recipients),
+            Err(Ok(ContractError::InvalidFeeSplit))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Percentages must sum to 100%")]
     fn set_recipients_total_over_100() {
         let f = AuthFixture::new();
         let recipients = Vec::from_array(
@@ -270,11 +303,13 @@ mod boundary {
                 },
             ],
         );
-        f.client().set_fee_recipients(&f.fee_mgr, &recipients);
+        assert_eq!(
+            f.client().try_set_fee_recipients(&f.fee_mgr, &recipients),
+            Err(Ok(ContractError::InvalidFeeSplit))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "No fee recipients configured")]
     fn distribute_without_recipients() {
         let env = Env::default();
         env.mock_all_auths();
@@ -290,14 +325,19 @@ mod boundary {
         client.grant_role(&admin, &Symbol::new(&env, ROLE_FEE_MANAGER), &fee_mgr);
 
         // No recipients set, try to distribute
-        client.distribute_fees(&fee_mgr, &token);
+        assert_eq!(
+            client.try_distribute_fees(&fee_mgr, &token),
+            Err(Ok(ContractError::NoFeeRecipientsConfigured))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "No fees to distribute")]
     fn distribute_without_collected_fees() {
         let f = AuthFixture::new();
-        f.client().distribute_fees(&f.fee_mgr, &f.token);
+        assert_eq!(
+            f.client().try_distribute_fees(&f.fee_mgr, &f.token),
+            Err(Ok(ContractError::NoFeesToDistribute))
+        );
     }
 
     #[test]
@@ -317,10 +357,12 @@ mod boundary {
     }
 
     #[test]
-    #[should_panic(expected = "Account does not hold role")]
     fn revoke_nonexistent_role() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().revoke_role(&f.admin, &role, &f.stranger);
+        assert_eq!(
+            f.client().try_revoke_role(&f.admin, &role, &f.stranger),
+            Err(Ok(ContractError::AccountDoesNotHoldRole))
+        );
     }
 }

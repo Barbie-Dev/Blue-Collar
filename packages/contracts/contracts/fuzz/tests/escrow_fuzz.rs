@@ -2,13 +2,10 @@
 //!
 //! Focus on authorization edge cases, amount validation, and escrow state transitions
 //! including create, release, cancel, and dispute resolution paths.
-// `Env::register_contract` is deprecated in favour of `Env::register`; the test
-// helpers here are migrated alongside the contracts, not ahead of them.
-#![allow(deprecated)]
 
 use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Symbol,
 };
@@ -165,16 +162,9 @@ proptest! {
         client.create_escrow(&depositor, &beneficiary, &token_addr, &id, &amount, &expiry);
 
         // Fast forward past expiry
-        env.ledger().set(LedgerInfo {
-            timestamp: 200,
-            protocol_version: 26,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1,
-            min_persistent_entry_ttl: 1,
-            max_entry_ttl: 100_000,
-        });
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp = 200;
+        env.ledger().set(ledger_info);
 
         client.cancel_escrow(&depositor, &id);
 

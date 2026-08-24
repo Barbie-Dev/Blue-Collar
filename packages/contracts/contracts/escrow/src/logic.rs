@@ -4,6 +4,7 @@
 //! All functions follow the Checks → Effects → Interactions (CEI) pattern.
 //! Token transfers (Interactions) only happen after storage is updated (Effects).
 
+use bluecollar_types::ContractError;
 use soroban_sdk::{symbol_short, token, Address, Env, Symbol, Vec};
 
 use crate::storage::{
@@ -45,22 +46,24 @@ pub fn role_to_id(env: &Env, role: &Symbol) -> u64 {
 // =============================================================================
 
 /// Assert `caller` holds `role` and has signed the transaction.
-///
-/// # Panics
-/// - `"Missing role"` if the membership check fails.
-pub fn require_role(env: &Env, role: &Symbol, caller: &Address) {
+pub fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
     caller.require_auth();
     let id = role_to_id(env, role);
     let members = load_role_members(env, id);
-    assert!(members.iter().any(|m| m == *caller), "Missing role");
+    if members.iter().any(|m| m == *caller) {
+        Ok(())
+    } else {
+        Err(ContractError::MissingRole)
+    }
 }
 
 /// Assert the contract is not paused.
-///
-/// # Panics
-/// - `"Contract is paused"`.
-pub fn require_not_paused(env: &Env) {
-    assert!(!storage::is_paused(env), "Contract is paused");
+pub fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+    if storage::is_paused(env) {
+        Err(ContractError::ContractIsPaused)
+    } else {
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -68,11 +71,10 @@ pub fn require_not_paused(env: &Env) {
 // =============================================================================
 
 /// Bootstrap the contract storage.
-///
-/// # Panics
-/// - `"Already initialized"` if called more than once.
-pub fn do_initialize(env: &Env, admin: &Address) {
-    assert!(!storage::is_initialized(env), "Already initialized");
+pub fn do_initialize(env: &Env, admin: &Address) -> Result<(), ContractError> {
+    if storage::is_initialized(env) {
+        return Err(ContractError::AlreadyInitialized);
+    }
 
     storage::set_initialized(env);
     storage::save_admin(env, admin);
@@ -86,6 +88,7 @@ pub fn do_initialize(env: &Env, admin: &Address) {
 
     env.events()
         .publish((symbol_short!("Init"), admin.clone()), 1u32);
+    Ok(())
 }
 
 // =============================================================================
@@ -95,12 +98,6 @@ pub fn do_initialize(env: &Env, admin: &Address) {
 /// Create a new escrow and lock `amount` tokens.
 ///
 /// The depositor must have approved the contract to spend `amount` tokens.
-///
-/// # Panics
-/// - `"Contract is paused"` if paused.
-/// - `"Escrow already exists"` if `id` is already registered.
-/// - `"amount must be positive"` if `amount <= 0`.
-/// - `"expiry must be in future"` if `expiry <= current timestamp`.
 pub fn do_create(
     env: &Env,
     depositor: &Address,
@@ -109,16 +106,19 @@ pub fn do_create(
     id: Symbol,
     amount: i128,
     expiry: u64,
-) {
+) -> Result<(), ContractError> {
     // --- Checks ---
-    require_not_paused(env);
+    require_not_paused(env)?;
     depositor.require_auth();
-    assert!(amount > 0, "amount must be positive");
-    assert!(
-        expiry > env.ledger().timestamp(),
-        "expiry must be in future"
-    );
-    assert!(load_escrow(env, &id).is_none(), "Escrow already exists");
+    if amount <= 0 {
+        return Err(ContractError::AmountMustBePositive);
+    }
+    if expiry <= env.ledger().timestamp() {
+        return Err(ContractError::ExpiryMustBeInFuture);
+    }
+    if load_escrow(env, &id).is_some() {
+        return Err(ContractError::EscrowAlreadyExists);
+    }
 
     // --- Effects ---
     let record = EscrowRecord {
@@ -140,35 +140,35 @@ pub fn do_create(
 
     // --- Interactions ---
     let token = token::Client::new(env, &token_addr);
-    token.transfer(depositor, env.current_contract_address(), &amount);
+    token.transfer(depositor, &env.current_contract_address(), &amount);
 
     env.events().publish(
         (symbol_short!("Created"), id),
         (depositor.clone(), beneficiary, amount),
     );
+    Ok(())
 }
 
 /// Release escrow funds to the beneficiary.
 ///
 /// Only the depositor or an admin may release.
-///
-/// # Panics
-/// - `"Escrow not found"` if id does not exist.
-/// - `"Not authorized"` if caller is neither depositor nor admin.
-/// - `"Escrow not active"` if state is not `Active`.
-pub fn do_release(env: &Env, caller: &Address, id: Symbol) {
+pub fn do_release(env: &Env, caller: &Address, id: Symbol) -> Result<(), ContractError> {
     // --- Checks ---
-    require_not_paused(env);
+    require_not_paused(env)?;
     caller.require_auth();
 
-    let mut record = load_escrow(env, &id).expect("Escrow not found");
-    assert!(record.state == EscrowState::Active, "Escrow not active");
+    let mut record = load_escrow(env, &id).ok_or(ContractError::EscrowNotFound)?;
+    if record.state != EscrowState::Active {
+        return Err(ContractError::EscrowNotActive);
+    }
 
     let is_depositor = record.depositor == *caller;
     let is_admin = load_role_members(env, ROLE_ADMIN_ID)
         .iter()
         .any(|m| m == *caller);
-    assert!(is_depositor || is_admin, "Not authorized");
+    if !is_depositor && !is_admin {
+        return Err(ContractError::NotAuthorized);
+    }
 
     // --- Effects ---
     record.state = EscrowState::Released;
@@ -187,30 +187,30 @@ pub fn do_release(env: &Env, caller: &Address, id: Symbol) {
         (symbol_short!("Released"), id),
         (caller.clone(), record.beneficiary, record.amount),
     );
+    Ok(())
 }
 
 /// Cancel escrow and refund funds to the depositor.
 ///
 /// Admin may cancel at any time. The depositor may self-cancel after expiry.
-///
-/// # Panics
-/// - `"Escrow not found"` if id does not exist.
-/// - `"Escrow not active"` if already settled.
-/// - `"Not authorized"` if caller lacks permission.
-pub fn do_cancel(env: &Env, caller: &Address, id: Symbol) {
+pub fn do_cancel(env: &Env, caller: &Address, id: Symbol) -> Result<(), ContractError> {
     // --- Checks ---
-    require_not_paused(env);
+    require_not_paused(env)?;
     caller.require_auth();
 
-    let mut record = load_escrow(env, &id).expect("Escrow not found");
-    assert!(record.state == EscrowState::Active, "Escrow not active");
+    let mut record = load_escrow(env, &id).ok_or(ContractError::EscrowNotFound)?;
+    if record.state != EscrowState::Active {
+        return Err(ContractError::EscrowNotActive);
+    }
 
     let is_admin = load_role_members(env, ROLE_ADMIN_ID)
         .iter()
         .any(|m| m == *caller);
     let is_expired_depositor =
         record.depositor == *caller && env.ledger().timestamp() >= record.expiry;
-    assert!(is_admin || is_expired_depositor, "Not authorized");
+    if !is_admin && !is_expired_depositor {
+        return Err(ContractError::NotAuthorized);
+    }
 
     // --- Effects ---
     record.state = EscrowState::Cancelled;
@@ -229,23 +229,23 @@ pub fn do_cancel(env: &Env, caller: &Address, id: Symbol) {
         (symbol_short!("Cancelled"), id),
         (caller.clone(), record.depositor, record.amount),
     );
+    Ok(())
 }
 
 /// File a dispute on an active escrow. Either party may call.
-///
-/// # Panics
-/// - `"Escrow not found"` if id does not exist.
-/// - `"Not a party"` if caller is neither depositor nor beneficiary.
-/// - `"Escrow not active"` if already settled.
-pub fn do_dispute(env: &Env, caller: &Address, id: Symbol) {
+pub fn do_dispute(env: &Env, caller: &Address, id: Symbol) -> Result<(), ContractError> {
     // --- Checks ---
-    require_not_paused(env);
+    require_not_paused(env)?;
     caller.require_auth();
 
-    let mut record = load_escrow(env, &id).expect("Escrow not found");
+    let mut record = load_escrow(env, &id).ok_or(ContractError::EscrowNotFound)?;
     let is_party = record.depositor == *caller || record.beneficiary == *caller;
-    assert!(is_party, "Not a party");
-    assert!(record.state == EscrowState::Active, "Escrow not active");
+    if !is_party {
+        return Err(ContractError::NotAParty);
+    }
+    if record.state != EscrowState::Active {
+        return Err(ContractError::EscrowNotActive);
+    }
 
     // --- Effects ---
     record.state = EscrowState::Disputed;
@@ -255,25 +255,27 @@ pub fn do_dispute(env: &Env, caller: &Address, id: Symbol) {
     // --- Interactions ---
     env.events()
         .publish((symbol_short!("Disputed"), id), caller.clone());
+    Ok(())
 }
 
 /// Resolve a disputed escrow. Caller must hold `ROLE_ARBITRATOR`.
 ///
 /// If `release_to_beneficiary` is `true`, funds go to the beneficiary;
 /// otherwise funds are returned to the depositor.
-///
-/// # Panics
-/// - `"Contract is paused"` if paused.
-/// - `"Escrow not found"` if id does not exist.
-/// - `"Missing role"` if caller does not hold `ROLE_ARBITRATOR`.
-/// - `"Escrow not disputed"` if state is not `Disputed`.
-pub fn do_resolve(env: &Env, caller: &Address, id: Symbol, release_to_beneficiary: bool) {
+pub fn do_resolve(
+    env: &Env,
+    caller: &Address,
+    id: Symbol,
+    release_to_beneficiary: bool,
+) -> Result<(), ContractError> {
     // --- Checks ---
-    require_not_paused(env);
-    require_role(env, &Symbol::new(env, ROLE_ARBITRATOR), caller);
+    require_not_paused(env)?;
+    require_role(env, &Symbol::new(env, ROLE_ARBITRATOR), caller)?;
 
-    let mut record = load_escrow(env, &id).expect("Escrow not found");
-    assert!(record.state == EscrowState::Disputed, "Escrow not disputed");
+    let mut record = load_escrow(env, &id).ok_or(ContractError::EscrowNotFound)?;
+    if record.state != EscrowState::Disputed {
+        return Err(ContractError::EscrowNotDisputed);
+    }
 
     // --- Effects ---
     let recipient = if release_to_beneficiary {
@@ -297,4 +299,5 @@ pub fn do_resolve(env: &Env, caller: &Address, id: Symbol, release_to_beneficiar
         (symbol_short!("Resolved"), id),
         (caller.clone(), recipient, release_to_beneficiary),
     );
+    Ok(())
 }

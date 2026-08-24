@@ -4,12 +4,8 @@
 //! with percentage-based splits.
 
 #![no_std]
-// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
-// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
-// event API changes the on-chain event ABI, so both are deliberately deferred to a
-// dedicated upgrade rather than mixed into unrelated changes.
-#![allow(deprecated)]
 
+use bluecollar_types::ContractError;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
 };
@@ -35,7 +31,7 @@ pub const ROLE_UPGRADER: &str = "upgrader";
 
 /// Fee recipient with percentage split.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FeeRecipient {
     /// Address to receive fees.
     pub address: Address,
@@ -45,7 +41,7 @@ pub struct FeeRecipient {
 
 /// Fee collection record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FeeCollection {
     /// Token contract address.
     pub token: Address,
@@ -80,11 +76,10 @@ pub struct FeeDistributionContract;
 #[contractimpl]
 impl FeeDistributionContract {
     /// Initialize the contract with an admin.
-    pub fn initialize(env: Env, admin: Address) {
-        assert!(
-            !env.storage().instance().has(&DataKey::Admin),
-            "Already initialized"
-        );
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(ContractError::AlreadyInitialized);
+        }
         env.storage().instance().set(&DataKey::Admin, &admin);
         let role = Symbol::new(&env, ROLE_ADMIN);
         let mut members: Vec<Address> = Vec::new(&env);
@@ -94,6 +89,7 @@ impl FeeDistributionContract {
             .set(&DataKey::RoleMembers(role.clone()), &members);
         env.events()
             .publish((symbol_short!("Init"), admin.clone()), ());
+        Ok(())
     }
 
     /// Get role members.
@@ -105,27 +101,38 @@ impl FeeDistributionContract {
     }
 
     /// Require role authorization.
-    fn require_role(env: &Env, role: &Symbol, caller: &Address) {
+    fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
         caller.require_auth();
         let members = Self::get_role_members(env, role);
-        assert!(members.iter().any(|m| m == *caller), "Missing role");
+        if !members.iter().any(|m| m == *caller) {
+            return Err(ContractError::MissingRole);
+        }
+        Ok(())
     }
 
     /// Require contract not paused.
-    fn require_not_paused(env: &Env) {
+    fn require_not_paused(env: &Env) -> Result<(), ContractError> {
         let paused: bool = env
             .storage()
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false);
-        assert!(!paused, "Contract is paused");
+        if paused {
+            return Err(ContractError::ContractIsPaused);
+        }
+        Ok(())
     }
 
     /// Grant a role to an address.
-    pub fn grant_role(env: Env, caller: Address, role: Symbol, account: Address) {
+    pub fn grant_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), ContractError> {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
-        Self::require_role(&env, &admin_role, &caller);
-        Self::require_not_paused(&env);
+        Self::require_role(&env, &admin_role, &caller)?;
+        Self::require_not_paused(&env)?;
 
         let mut members = Self::get_role_members(&env, &role);
         if members.iter().all(|m| m != account) {
@@ -136,13 +143,19 @@ impl FeeDistributionContract {
         }
         env.events()
             .publish((symbol_short!("RlGrnt"), role, account), ());
+        Ok(())
     }
 
     /// Revoke a role from an address.
-    pub fn revoke_role(env: Env, caller: Address, role: Symbol, account: Address) {
+    pub fn revoke_role(
+        env: Env,
+        caller: Address,
+        role: Symbol,
+        account: Address,
+    ) -> Result<(), ContractError> {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
-        Self::require_role(&env, &admin_role, &caller);
-        Self::require_not_paused(&env);
+        Self::require_role(&env, &admin_role, &caller)?;
+        Self::require_not_paused(&env)?;
 
         let members = Self::get_role_members(&env, &role);
         let mut updated: Vec<Address> = Vec::new(&env);
@@ -154,64 +167,84 @@ impl FeeDistributionContract {
                 updated.push_back(m);
             }
         }
-        assert!(found, "Account does not hold role");
+        if !found {
+            return Err(ContractError::AccountDoesNotHoldRole);
+        }
         env.storage()
             .persistent()
             .set(&DataKey::RoleMembers(role.clone()), &updated);
         env.events()
             .publish((symbol_short!("RlRvkd"), role, account), ());
+        Ok(())
     }
 
     /// Pause the contract.
-    pub fn pause(env: Env, caller: Address) {
+    pub fn pause(env: Env, caller: Address) -> Result<(), ContractError> {
         let pauser_role = Symbol::new(&env, ROLE_PAUSER);
-        Self::require_role(&env, &pauser_role, &caller);
+        Self::require_role(&env, &pauser_role, &caller)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         env.events().publish((symbol_short!("Paused"), caller), ());
+        Ok(())
     }
 
     /// Unpause the contract.
-    pub fn unpause(env: Env, caller: Address) {
+    pub fn unpause(env: Env, caller: Address) -> Result<(), ContractError> {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
-        Self::require_role(&env, &admin_role, &caller);
+        Self::require_role(&env, &admin_role, &caller)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         env.events()
             .publish((symbol_short!("Unpaused"), caller), ());
+        Ok(())
     }
 
     /// Set fee recipients with percentage splits.
-    pub fn set_fee_recipients(env: Env, caller: Address, recipients: Vec<FeeRecipient>) {
+    pub fn set_fee_recipients(
+        env: Env,
+        caller: Address,
+        recipients: Vec<FeeRecipient>,
+    ) -> Result<(), ContractError> {
         let fee_mgr_role = Symbol::new(&env, ROLE_FEE_MANAGER);
-        Self::require_role(&env, &fee_mgr_role, &caller);
-        Self::require_not_paused(&env);
+        Self::require_role(&env, &fee_mgr_role, &caller)?;
+        Self::require_not_paused(&env)?;
 
         // Validate total percentage equals 10000 (100%)
         let mut total_bps: u32 = 0;
         for recipient in recipients.iter() {
             total_bps = total_bps.saturating_add(recipient.percentage_bps);
         }
-        assert!(total_bps == MAX_FEE_BPS, "Percentages must sum to 100%");
+        if total_bps != MAX_FEE_BPS {
+            return Err(ContractError::InvalidFeeSplit);
+        }
 
         env.storage()
             .persistent()
             .set(&DataKey::FeeRecipients, &recipients);
         env.events()
-            .publish((symbol_short!("FeeRcp"), recipients.len()), ());
+            .publish((symbol_short!("FeeRcp"), recipients.len() as u32), ());
+        Ok(())
     }
 
     /// Get current fee recipients.
-    pub fn get_fee_recipients(env: Env) -> Vec<FeeRecipient> {
-        env.storage()
+    pub fn get_fee_recipients(env: Env) -> Result<Vec<FeeRecipient>, ContractError> {
+        Ok(env
+            .storage()
             .persistent()
             .get(&DataKey::FeeRecipients)
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env)))
     }
 
     /// Collect fees from a token.
-    pub fn collect_fees(env: Env, from: Address, token: Address, amount: i128) {
+    pub fn collect_fees(
+        env: Env,
+        from: Address,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
         from.require_auth();
-        Self::require_not_paused(&env);
-        assert!(amount > 0, "Amount must be positive");
+        Self::require_not_paused(&env)?;
+        if amount <= 0 {
+            return Err(ContractError::AmountMustBePositive);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -238,16 +271,19 @@ impl FeeDistributionContract {
 
         env.events()
             .publish((symbol_short!("FeeColl"), token, amount), ());
+        Ok(())
     }
 
     /// Distribute collected fees to recipients.
-    pub fn distribute_fees(env: Env, caller: Address, token: Address) {
+    pub fn distribute_fees(env: Env, caller: Address, token: Address) -> Result<(), ContractError> {
         let fee_mgr_role = Symbol::new(&env, ROLE_FEE_MANAGER);
-        Self::require_role(&env, &fee_mgr_role, &caller);
-        Self::require_not_paused(&env);
+        Self::require_role(&env, &fee_mgr_role, &caller)?;
+        Self::require_not_paused(&env)?;
 
-        let recipients = Self::get_fee_recipients(env.clone());
-        assert!(!recipients.is_empty(), "No fee recipients configured");
+        let recipients = Self::get_fee_recipients(env.clone())?;
+        if recipients.is_empty() {
+            return Err(ContractError::NoFeeRecipientsConfigured);
+        }
 
         let mut collection: FeeCollection = env
             .storage()
@@ -260,7 +296,9 @@ impl FeeDistributionContract {
             });
 
         let available = collection.total_amount - collection.distributed_amount;
-        assert!(available > 0, "No fees to distribute");
+        if available <= 0 {
+            return Err(ContractError::NoFeesToDistribute);
+        }
 
         let token_client = token::Client::new(&env, &token);
 
@@ -282,44 +320,59 @@ impl FeeDistributionContract {
         env.storage()
             .persistent()
             .set(&DataKey::FeeCollection(token.clone()), &collection);
+        Ok(())
     }
 
     /// Get fee collection status for a token.
-    pub fn get_fee_collection(env: Env, token: Address) -> FeeCollection {
-        env.storage()
+    pub fn get_fee_collection(env: Env, token: Address) -> Result<FeeCollection, ContractError> {
+        Ok(env
+            .storage()
             .persistent()
             .get(&DataKey::FeeCollection(token.clone()))
             .unwrap_or(FeeCollection {
                 token,
                 total_amount: 0,
                 distributed_amount: 0,
-            })
+            }))
     }
 
     /// Withdraw unclaimed fees (emergency function).
-    pub fn withdraw_fees(env: Env, caller: Address, token: Address, amount: i128) {
+    pub fn withdraw_fees(
+        env: Env,
+        caller: Address,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
         let admin_role = Symbol::new(&env, ROLE_ADMIN);
-        Self::require_role(&env, &admin_role, &caller);
-        assert!(amount > 0, "Amount must be positive");
+        Self::require_role(&env, &admin_role, &caller)?;
+        if amount <= 0 {
+            return Err(ContractError::AmountMustBePositive);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&env.current_contract_address(), &caller, &amount);
 
         env.events()
             .publish((symbol_short!("FeeWdraw"), token, amount), ());
+        Ok(())
     }
 
     /// Return the event schema version.
-    pub fn version(_env: Env) -> u32 {
-        VERSION
+    pub fn version(_env: Env) -> Result<u32, ContractError> {
+        Ok(VERSION)
     }
 
     /// Upgrade contract WASM.
-    pub fn upgrade(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+    pub fn upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
         let upgrader_role = Symbol::new(&env, ROLE_UPGRADER);
-        Self::require_role(&env, &upgrader_role, &caller);
+        Self::require_role(&env, &upgrader_role, &caller)?;
         env.deployer().update_current_contract_wasm(new_wasm_hash);
         env.events().publish((symbol_short!("Upgrade"), caller), ());
+        Ok(())
     }
 }
 

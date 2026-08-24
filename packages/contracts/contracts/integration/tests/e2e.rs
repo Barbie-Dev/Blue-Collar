@@ -10,9 +10,7 @@
 //!
 //! Run:
 //!   cargo test -p bluecollar-integration
-// `Env::register_contract` is deprecated in favour of `Env::register`; the test
-// helpers here are migrated alongside the contracts, not ahead of them.
-#![allow(deprecated)]
+
 #![cfg(test)]
 
 use soroban_sdk::{testutils::Address as _, token, Address, BytesN, Env, String, Symbol};
@@ -27,14 +25,17 @@ fn zero_hash(env: &Env) -> BytesN<32> {
 }
 
 /// Deploy and initialise a fresh Registry contract.
-///
-/// `add_curator` is gated behind the `curator_mgr` role, so grant it to the
-/// admin here — every caller of this helper goes on to manage curators.
+/// Grants all management roles to `admin` so integration tests can exercise
+/// the full API (add_curator, etc.).
 fn deploy_registry<'a>(env: &'a Env, admin: &Address) -> RegistryContractClient<'a> {
     let contract_id = env.register_contract(None, bluecollar_registry::RegistryContract);
     let client = RegistryContractClient::new(env, &contract_id);
     client.initialize(admin);
+    // Grant the same roles that the registry unit-test fixture bootstraps.
+    client.grant_role(admin, &Symbol::new(env, "pauser"), admin);
     client.grant_role(admin, &Symbol::new(env, "curator_mgr"), admin);
+    client.grant_role(admin, &Symbol::new(env, "rep_mgr"), admin);
+    client.grant_role(admin, &Symbol::new(env, "upgrader"), admin);
     client
 }
 
@@ -45,10 +46,10 @@ fn deploy_token<'a>(
     to: &Address,
     amount: i128,
 ) -> token::Client<'a> {
-    let token_id = env.register_stellar_asset_contract(admin.clone());
-    let admin_client = token::StellarAssetClient::new(env, &token_id);
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    let admin_client = token::StellarAssetClient::new(env, &token_id.address());
     admin_client.mint(to, &amount);
-    token::Client::new(env, &token_id)
+    token::Client::new(env, &token_id.address())
 }
 
 /// Deploy and initialise a fresh Market contract.
@@ -93,7 +94,7 @@ fn registry_register_and_get_worker() {
     );
 
     // Assert worker exists and is active
-    let worker = registry.get_worker(&id).expect("worker registered");
+    let worker = registry.get_worker(&id).unwrap();
     assert_eq!(worker.id, id);
     assert!(worker.is_active);
     assert_eq!(worker.owner, owner);
@@ -124,17 +125,16 @@ fn registry_toggle_active_status() {
 
     // Toggle off
     registry.toggle(&id, &owner);
-    let w = registry.get_worker(&id).expect("worker registered");
+    let w = registry.get_worker(&id).unwrap();
     assert!(!w.is_active);
 
     // Toggle back on
     registry.toggle(&id, &owner);
-    let w2 = registry.get_worker(&id).expect("worker registered");
+    let w2 = registry.get_worker(&id).unwrap();
     assert!(w2.is_active);
 }
 
 #[test]
-#[should_panic(expected = "Caller is not a curator")]
 fn registry_register_without_curator_fails() {
     let env = Env::default();
     env.mock_all_auths();
@@ -145,7 +145,7 @@ fn registry_register_without_curator_fails() {
 
     let registry = deploy_registry(&env, &admin);
 
-    registry.register(
+    let res = registry.try_register(
         &Symbol::new(&env, "worker_003"),
         &owner,
         &String::from_str(&env, "Carol"),
@@ -153,6 +153,10 @@ fn registry_register_without_curator_fails() {
         &zero_hash(&env),
         &zero_hash(&env),
         &non_curator, // not a curator
+    );
+    assert_eq!(
+        res,
+        Err(Ok(bluecollar_types::ContractError::CallerIsNotCurator))
     );
 }
 
@@ -225,7 +229,6 @@ fn market_escrow_create_and_release() {
 }
 
 #[test]
-#[should_panic(expected = "Escrow id already exists")]
 fn market_escrow_duplicate_id_fails() {
     let env = Env::default();
     env.mock_all_auths();
@@ -241,7 +244,11 @@ fn market_escrow_duplicate_id_fails() {
     let expiry = env.ledger().timestamp() + 3_600;
 
     market.create_escrow(&id, &payer, &worker, &token.address, &100, &expiry);
-    market.create_escrow(&id, &payer, &worker, &token.address, &100, &expiry);
+    let res = market.try_create_escrow(&id, &payer, &worker, &token.address, &100, &expiry);
+    assert_eq!(
+        res,
+        Err(Ok(bluecollar_types::ContractError::EscrowAlreadyExists))
+    );
 }
 
 // ── Cross-contract: register then tip ────────────────────────────────────────
@@ -276,7 +283,7 @@ fn register_worker_then_tip_end_to_end() {
     );
 
     // Verify worker is on-chain and active
-    let w = registry.get_worker(&worker_id).expect("worker registered");
+    let w = registry.get_worker(&worker_id).unwrap();
     assert!(w.is_active);
 
     // Tip the worker's wallet address

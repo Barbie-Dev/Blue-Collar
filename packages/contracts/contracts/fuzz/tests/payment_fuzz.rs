@@ -2,13 +2,10 @@
 //!
 //! Focus on critical entrypoints handling amounts, authorization edge cases,
 //! and payment status transitions.
-// `Env::register_contract` is deprecated in favour of `Env::register`; the test
-// helpers here are migrated alongside the contracts, not ahead of them.
-#![allow(deprecated)]
 
 use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger},
     token::{Client as TokenClient, StellarAssetClient},
     Address, Env, Symbol,
 };
@@ -125,23 +122,14 @@ proptest! {
         client.initialize(&admin, &0, &admin);
 
         let id = Symbol::new(&env, &payment_id);
-        let expiry = 100;
+        let expiry = env.ledger().timestamp() + 100;
 
-        // Lock while the expiry is still in the future; `lock_payment` rejects a
-        // past expiry.
         client.lock_payment(&client_addr, &worker, &token_addr, &id, &amount, &expiry);
 
-        // Fast forward past expiry so the payment becomes refundable.
-        env.ledger().set(LedgerInfo {
-            timestamp: 200,
-            protocol_version: 26,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1,
-            min_persistent_entry_ttl: 1,
-            max_entry_ttl: 100_000,
-        });
+        // Fast forward to after expiry.
+        let mut ledger_info = env.ledger().get();
+        ledger_info.timestamp = expiry + 1;
+        env.ledger().set(ledger_info);
 
         let client_before = TokenClient::new(&env, &token_addr).balance(&client_addr);
         client.refund_payment(&client_addr, &id);

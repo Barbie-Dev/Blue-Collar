@@ -11,6 +11,8 @@ use soroban_sdk::{contracttype, Address, BytesN, Env, Symbol, Vec};
 // TTL Constants
 // =============================================================================
 
+pub use bluecollar_types::storage::{TTL_EXTEND_TO, TTL_THRESHOLD};
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -33,7 +35,7 @@ pub enum JobStatus {
 
 /// A single on-chain job listing.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     /// Unique job identifier.
     pub id: Symbol,
@@ -108,7 +110,7 @@ pub fn save_job(env: &Env, job: &Job) {
     extend_job_ttl(env, &job.id);
 }
 
-/// Extend the TTL on a job entry.
+/// Extend the TTL on a job entry. A missing entry is a no-op.
 pub fn extend_job_ttl(env: &Env, id: &Symbol) {
     extend_ttl(env, &DataKey::Job(id.clone()));
 }

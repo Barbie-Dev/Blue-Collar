@@ -3,10 +3,11 @@
 
 /** Standard API envelope returned by all endpoints. */
 export interface ApiResponse<T = undefined> {
-  status: "success" | "error";
-  message: string;
-  code: number;
   data?: T;
+  meta?: Meta;
+  status: "success" | "error" | string;
+  code: number;
+  message?: string;
   token?: string;
 }
 
@@ -22,6 +23,9 @@ export interface PaginatedResult<T> {
   data: T[];
   meta: Meta;
 }
+
+/** Paginated list response. */
+export type PaginatedResponse<T> = ApiResponse<T[]> & { meta: Meta };
 
 // ─── Auth DTOs ────────────────────────────────────────────────────────────────
 
@@ -46,8 +50,10 @@ export interface ResetPasswordDTO {
   password: string;
 }
 
-/** Authenticated user shape returned from /auth/me. */
-export interface AuthUser {
+// ─── Auth types ───────────────────────────────────────────────────────────────
+
+/** Authenticated user shape returned from /auth/me and stored in AuthContext. */
+export interface User {
   id: string;
   email: string;
   firstName: string;
@@ -56,7 +62,12 @@ export interface AuthUser {
   verified: boolean;
   avatar?: string | null;
   onboardingCompleted?: boolean;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
+
+/** Alias for backward compatibility */
+export interface AuthUser extends User {}
 
 // ─── Category ─────────────────────────────────────────────────────────────────
 
@@ -91,7 +102,7 @@ export interface Worker {
   locationId?: string | null;
   walletAddress?: string | null;
   categoryId?: string;
-  category: Category;
+  category?: Category;
   averageRating?: number | null;
   reviewCount?: number;
   portfolioImages?: PortfolioImage[];
@@ -128,27 +139,16 @@ export interface Review {
   };
 }
 
-// ─── Auth types ───────────────────────────────────────────────────────────────
-
-/** Authenticated user shape returned from /auth/me and stored in AuthContext. */
-export interface User {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: "user" | "curator" | "admin";
-  verified: boolean;
-  avatar?: string | null;
-  onboardingCompleted?: boolean;
-  createdAt?: string | Date;
-  updatedAt?: string | Date;
+export interface CreateReviewDTO {
+  rating: number;
+  comment?: string;
 }
 
-// Alias for backward compatibility
-export interface AuthUser extends User {}
-
-/** Paginated list response. */
-export type PaginatedResponse<T> = ApiResponse<T[]> & { meta: Meta };
+export interface RatingDistributionEntry {
+  rating: number;
+  count: number;
+  percentage: number;
+}
 
 // ─── Form types ───────────────────────────────────────────────────────────────
 
@@ -209,13 +209,6 @@ export interface SdkConfig {
   registryContractId?: string;
   marketContractId?: string;
   network: 'testnet' | 'mainnet';
-}
-
-// ─── Audit Log ──────────────────────────────────────────────────────────────
-
-export interface CreateReviewDTO {
-  rating: number;
-  comment?: string;
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -331,12 +324,6 @@ export interface WorkerAnalytics {
   avgRating: number;
   reviewCount: number;
   updatedAt: string | null;
-}
-
-export interface RatingDistributionEntry {
-  rating: number;
-  count: number;
-  percentage: number;
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

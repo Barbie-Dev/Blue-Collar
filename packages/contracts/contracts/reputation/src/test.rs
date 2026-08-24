@@ -60,14 +60,16 @@ fn test_initialize_success() {
 }
 
 #[test]
-#[should_panic(expected = "Already initialized")]
 fn test_initialize_twice_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let (_, client) = deploy_client(&env);
     client.initialize(&admin);
-    client.initialize(&admin); // must panic
+    assert_eq!(
+        client.try_initialize(&admin),
+        Err(Ok(ContractError::AlreadyInitialized))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +107,6 @@ fn test_submit_review_averages_multiple() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_submit_review_unauthorized() {
     let (env, _admin, _rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -115,12 +116,13 @@ fn test_submit_review_unauthorized() {
 
     let attacker = Address::generate(&env);
     let worker_id = Symbol::new(&env, "worker1");
-    // attacker does NOT hold ROLE_REP_MGR — must panic
-    client.submit_review(&attacker, &worker_id, &9_000, &zero_hash(&env));
+    assert_eq!(
+        client.try_submit_review(&attacker, &worker_id, &9_000, &zero_hash(&env)),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "rating_bps out of range")]
 fn test_submit_review_rating_overflow() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -130,7 +132,10 @@ fn test_submit_review_rating_overflow() {
     client.grant_role(&admin, &Symbol::new(&env, ROLE_REP_MGR), &rep_mgr);
 
     let worker_id = Symbol::new(&env, "worker1");
-    client.submit_review(&rep_mgr, &worker_id, &10_001, &zero_hash(&env)); // > MAX_SCORE
+    assert_eq!(
+        client.try_submit_review(&rep_mgr, &worker_id, &10_001, &zero_hash(&env)),
+        Err(Ok(ContractError::RatingOutOfRange))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +177,6 @@ fn test_slash_reputation_clamps_at_zero() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_slash_reputation_unauthorized() {
     let (env, _admin, _rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -182,12 +186,13 @@ fn test_slash_reputation_unauthorized() {
 
     let attacker = Address::generate(&env);
     let worker_id = Symbol::new(&env, "worker1");
-    // REGRESSION: this call must fail — previously it was unguarded
-    client.slash_reputation(&attacker, &worker_id, &5_000);
+    assert_eq!(
+        client.try_slash_reputation(&attacker, &worker_id, &5_000),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "slash_bps out of range")]
 fn test_slash_reputation_overflow_input() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -197,7 +202,10 @@ fn test_slash_reputation_overflow_input() {
     client.grant_role(&admin, &Symbol::new(&env, ROLE_REP_MGR), &rep_mgr);
 
     let worker_id = Symbol::new(&env, "worker1");
-    client.slash_reputation(&rep_mgr, &worker_id, &10_001);
+    assert_eq!(
+        client.try_slash_reputation(&rep_mgr, &worker_id, &10_001),
+        Err(Ok(ContractError::ScoreOutOfRange))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +233,6 @@ fn test_reset_reputation_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_reset_reputation_unauthorized() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -237,12 +244,13 @@ fn test_reset_reputation_unauthorized() {
     let attacker = Address::generate(&env);
     let worker_id = Symbol::new(&env, "worker1");
     client.submit_review(&rep_mgr, &worker_id, &9_000, &zero_hash(&env));
-    // REGRESSION: rep_mgr should NOT be able to reset — only admin
-    client.reset_reputation(&attacker, &worker_id);
+    assert_eq!(
+        client.try_reset_reputation(&attacker, &worker_id),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_reset_reputation_rep_mgr_blocked() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -253,8 +261,10 @@ fn test_reset_reputation_rep_mgr_blocked() {
 
     let worker_id = Symbol::new(&env, "worker1");
     client.submit_review(&rep_mgr, &worker_id, &9_000, &zero_hash(&env));
-    // rep_mgr does NOT hold ROLE_ADMIN — must be blocked
-    client.reset_reputation(&rep_mgr, &worker_id);
+    assert_eq!(
+        client.try_reset_reputation(&rep_mgr, &worker_id),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +287,6 @@ fn test_award_badge_success() {
 }
 
 #[test]
-#[should_panic(expected = "Badge already awarded")]
 fn test_award_badge_duplicate_panics() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -289,11 +298,13 @@ fn test_award_badge_duplicate_panics() {
     let worker_id = Symbol::new(&env, "worker1");
     let badge = Symbol::new(&env, "top_rated");
     client.award_badge(&rep_mgr, &worker_id, &badge);
-    client.award_badge(&rep_mgr, &worker_id, &badge); // duplicate — must panic
+    assert_eq!(
+        client.try_award_badge(&rep_mgr, &worker_id, &badge),
+        Err(Ok(ContractError::BadgeAlreadyAwarded))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_award_badge_unauthorized() {
     let (env, _admin, _rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -303,7 +314,10 @@ fn test_award_badge_unauthorized() {
 
     let attacker = Address::generate(&env);
     let worker_id = Symbol::new(&env, "worker1");
-    client.award_badge(&attacker, &worker_id, &Symbol::new(&env, "badge"));
+    assert_eq!(
+        client.try_award_badge(&attacker, &worker_id, &Symbol::new(&env, "badge")),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +347,6 @@ fn test_revoke_badge_success() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_submit_review_while_paused() {
     let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
@@ -347,7 +360,10 @@ fn test_submit_review_while_paused() {
     assert!(client.is_paused());
 
     let worker_id = Symbol::new(&env, "worker1");
-    client.submit_review(&rep_mgr, &worker_id, &8_000, &zero_hash(&env));
+    assert_eq!(
+        client.try_submit_review(&rep_mgr, &worker_id, &8_000, &zero_hash(&env)),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 #[test]

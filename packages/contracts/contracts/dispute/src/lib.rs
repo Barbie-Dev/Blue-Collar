@@ -23,15 +23,11 @@
 //! of how the implementation is organised.
 
 #![no_std]
-// soroban-sdk 26 deprecates `Events::publish` in favour of the `#[contractevent]`
-// macro, and `Env::register_contract` in favour of `Env::register`. Migrating the
-// event API changes the on-chain event ABI, so both are deliberately deferred to a
-// dedicated upgrade rather than mixed into unrelated changes.
-#![allow(deprecated)]
 
 mod logic;
 mod storage;
 
+use bluecollar_types::ContractError;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Symbol, Vec};
 
 pub use storage::{DataKey, Dispute, DisputeOutcome, DisputeStatus, TTL_EXTEND_TO, TTL_THRESHOLD};
@@ -56,18 +52,18 @@ impl DisputeContract {
     ///
     /// # Events
     /// Emits `("Init", admin)`.
-    pub fn initialize(env: Env, admin: Address) {
-        logic::initialize(&env, &admin);
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
+        logic::initialize(&env, &admin)
     }
 
     /// Return the admin address.
-    pub fn get_admin(env: Env) -> Address {
+    pub fn get_admin(env: Env) -> Result<Address, ContractError> {
         storage::get_admin(&env)
     }
 
     /// Return the event schema version.
-    pub fn version(_env: Env) -> u32 {
-        VERSION
+    pub fn version(_env: Env) -> Result<u32, ContractError> {
+        Ok(VERSION)
     }
 
     // -------------------------------------------------------------------------
@@ -75,13 +71,13 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Pause the contract (admin only).
-    pub fn pause(env: Env, admin: Address) {
-        logic::pause(&env, &admin);
+    pub fn pause(env: Env, admin: Address) -> Result<(), ContractError> {
+        logic::pause(&env, &admin)
     }
 
     /// Unpause the contract (admin only).
-    pub fn unpause(env: Env, admin: Address) {
-        logic::unpause(&env, &admin);
+    pub fn unpause(env: Env, admin: Address) -> Result<(), ContractError> {
+        logic::unpause(&env, &admin)
     }
 
     // -------------------------------------------------------------------------
@@ -92,21 +88,29 @@ impl DisputeContract {
     ///
     /// # Events
     /// Emits `("ArbAdd", arbitrator)`.
-    pub fn add_arbitrator(env: Env, admin: Address, arbitrator: Address) {
-        logic::add_arbitrator(&env, &admin, &arbitrator);
+    pub fn add_arbitrator(
+        env: Env,
+        admin: Address,
+        arbitrator: Address,
+    ) -> Result<(), ContractError> {
+        logic::add_arbitrator(&env, &admin, &arbitrator)
     }
 
     /// Remove an arbitrator (admin only).
     ///
     /// # Events
     /// Emits `("ArbRem", arbitrator)`.
-    pub fn remove_arbitrator(env: Env, admin: Address, arbitrator: Address) {
-        logic::remove_arbitrator(&env, &admin, &arbitrator);
+    pub fn remove_arbitrator(
+        env: Env,
+        admin: Address,
+        arbitrator: Address,
+    ) -> Result<(), ContractError> {
+        logic::remove_arbitrator(&env, &admin, &arbitrator)
     }
 
     /// Return all approved arbitrators.
-    pub fn list_arbitrators(env: Env) -> Vec<Address> {
-        storage::get_arbitrators(&env)
+    pub fn list_arbitrators(env: Env) -> Result<Vec<Address>, ContractError> {
+        Ok(storage::get_arbitrators(&env))
     }
 
     // -------------------------------------------------------------------------
@@ -116,21 +120,6 @@ impl DisputeContract {
     /// File a dispute and lock `amount` tokens in this contract.
     ///
     /// Tokens are transferred from `disputer` to the contract immediately.
-    ///
-    /// # Parameters
-    /// - `id`: Unique identifier for this dispute.
-    /// - `disputer`: Party filing the dispute; `require_auth()` enforced.
-    /// - `respondent`: Party being disputed.
-    /// - `token`: Token contract address.
-    /// - `amount`: Amount to lock (must be > 0).
-    /// - `evidence_hash`: SHA-256 of disputer's off-chain evidence (IPFS CID, etc.).
-    ///
-    /// # Panics
-    /// - `"Already initialized"` duplicated id.
-    /// - `"Amount must be positive"`.
-    ///
-    /// # Events
-    /// Emits `("DspOpen", id, disputer)` with data `(respondent, amount)`.
     pub fn file_dispute(
         env: Env,
         id: Symbol,
@@ -139,8 +128,8 @@ impl DisputeContract {
         token: Address,
         amount: i128,
         evidence_hash: String,
-    ) {
-        logic::file_dispute(&env, id, disputer, respondent, token, amount, evidence_hash);
+    ) -> Result<(), ContractError> {
+        logic::file_dispute(&env, id, disputer, respondent, token, amount, evidence_hash)
     }
 
     // -------------------------------------------------------------------------
@@ -148,22 +137,13 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Submit evidence for an open dispute.
-    ///
-    /// Either the disputer or the respondent may call this to attach or update
-    /// their evidence hash. Advances status to `Evidence` on first submission.
-    ///
-    /// # Parameters
-    /// - `dispute_id`: The dispute identifier.
-    /// - `caller`: Must be `disputer` or `respondent`; `require_auth()` enforced.
-    /// - `evidence_hash`: SHA-256 of caller's off-chain evidence.
-    ///
-    /// # Panics
-    /// - `"Dispute not found"` / `"Not a party"` / `"Dispute not open or in evidence phase"`.
-    ///
-    /// # Events
-    /// Emits `("DspEvid", dispute_id, caller)`.
-    pub fn submit_evidence(env: Env, dispute_id: Symbol, caller: Address, evidence_hash: String) {
-        logic::submit_evidence(&env, dispute_id, caller, evidence_hash);
+    pub fn submit_evidence(
+        env: Env,
+        dispute_id: Symbol,
+        caller: Address,
+        evidence_hash: String,
+    ) -> Result<(), ContractError> {
+        logic::submit_evidence(&env, dispute_id, caller, evidence_hash)
     }
 
     // -------------------------------------------------------------------------
@@ -171,26 +151,14 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Record an arbitrator's decision. Does NOT transfer tokens yet.
-    ///
-    /// The dispute must be in `Open` or `Evidence` phase.
-    /// Call `settle` afterwards to execute the transfer.
-    ///
-    /// # Parameters
-    /// - `dispute_id`: The dispute identifier.
-    /// - `arbitrator`: Must be in the approved arbitrator list; `require_auth()` enforced.
-    /// - `outcome`: The decision.
-    /// - `split_bps`: Respondent's share in bps; only used when `outcome == Split`.
-    ///
-    /// # Events
-    /// Emits `("DspDcide", dispute_id, arbitrator)` with data `(outcome as u32, split_bps)`.
     pub fn decide(
         env: Env,
         dispute_id: Symbol,
         arbitrator: Address,
         outcome: DisputeOutcome,
         split_bps: u32,
-    ) {
-        logic::decide(&env, dispute_id, arbitrator, outcome, split_bps);
+    ) -> Result<(), ContractError> {
+        logic::decide(&env, dispute_id, arbitrator, outcome, split_bps)
     }
 
     // -------------------------------------------------------------------------
@@ -198,13 +166,8 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Execute token settlement according to the arbitrator's decision.
-    ///
-    /// Callable by anyone once the dispute is in `Decided` phase.
-    ///
-    /// # Events
-    /// Emits `("DspSettle", dispute_id)` with data `(outcome as u32, amount)`.
-    pub fn settle(env: Env, dispute_id: Symbol) {
-        logic::settle(&env, dispute_id);
+    pub fn settle(env: Env, dispute_id: Symbol) -> Result<(), ContractError> {
+        logic::settle(&env, dispute_id)
     }
 
     // -------------------------------------------------------------------------
@@ -212,13 +175,13 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Get a dispute by id.
-    pub fn get_dispute(env: Env, dispute_id: Symbol) -> Option<Dispute> {
-        storage::get_dispute(&env, &dispute_id)
+    pub fn get_dispute(env: Env, dispute_id: Symbol) -> Result<Option<Dispute>, ContractError> {
+        Ok(storage::get_dispute(&env, &dispute_id))
     }
 
     /// List all dispute ids.
-    pub fn list_disputes(env: Env) -> Vec<Symbol> {
-        storage::get_dispute_list(&env)
+    pub fn list_disputes(env: Env) -> Result<Vec<Symbol>, ContractError> {
+        Ok(storage::get_dispute_list(&env))
     }
 
     // -------------------------------------------------------------------------
@@ -226,8 +189,12 @@ impl DisputeContract {
     // -------------------------------------------------------------------------
 
     /// Upgrade the contract WASM. Admin only.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
-        logic::upgrade(&env, &admin, new_wasm_hash);
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), ContractError> {
+        logic::upgrade(&env, &admin, new_wasm_hash)
     }
 }
 
@@ -288,7 +255,7 @@ mod tests {
             }
         }
 
-        fn client(&self) -> DisputeContractClient<'_> {
+        fn client(&self) -> DisputeContractClient {
             DisputeContractClient::new(&self.env, &self.contract)
         }
 
@@ -323,10 +290,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Already initialized")]
     fn test_double_initialize_panics() {
         let t = T::new();
-        t.client().initialize(&t.admin);
+        assert_eq!(
+            t.client().try_initialize(&t.admin),
+            Err(Ok(ContractError::AlreadyInitialized))
+        );
     }
 
     #[test]
@@ -340,11 +309,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Dispute id already exists")]
     fn test_duplicate_dispute_panics() {
         let t = T::new();
         t.open();
-        t.open();
+        assert_eq!(
+            t.client().try_file_dispute(
+                &t.id(),
+                &t.disputer,
+                &t.respondent,
+                &t.token,
+                &100_000,
+                &t.hash("abc123"),
+            ),
+            Err(Ok(ContractError::DisputeIdAlreadyExists))
+        );
     }
 
     #[test]
@@ -359,13 +337,15 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Not a party")]
     fn test_submit_evidence_stranger_panics() {
         let t = T::new();
         t.open();
         let stranger = Address::generate(&t.env);
-        t.client()
-            .submit_evidence(&t.id(), &stranger, &t.hash("xyz"));
+        assert_eq!(
+            t.client()
+                .try_submit_evidence(&t.id(), &stranger, &t.hash("xyz")),
+            Err(Ok(ContractError::NotAParty))
+        );
     }
 
     #[test]
@@ -385,21 +365,25 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Not an arbitrator")]
     fn test_decide_non_arbitrator_panics() {
         let t = T::new();
         t.open();
         let stranger = Address::generate(&t.env);
-        t.client()
-            .decide(&t.id(), &stranger, &DisputeOutcome::RefundDisputer, &0);
+        assert_eq!(
+            t.client()
+                .try_decide(&t.id(), &stranger, &DisputeOutcome::RefundDisputer, &0),
+            Err(Ok(ContractError::NotAnArbitrator))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Not decided yet")]
     fn test_settle_before_decide_panics() {
         let t = T::new();
         t.open();
-        t.client().settle(&t.id());
+        assert_eq!(
+            t.client().try_settle(&t.id()),
+            Err(Ok(ContractError::NotDecidedYet))
+        );
     }
 
     #[test]
@@ -446,14 +430,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Not decided yet")]
     fn test_settle_twice_panics() {
         let t = T::new();
         t.open();
         t.client()
             .decide(&t.id(), &t.arbitrator, &DisputeOutcome::RefundDisputer, &0);
         t.client().settle(&t.id());
-        t.client().settle(&t.id());
+        assert_eq!(
+            t.client().try_settle(&t.id()),
+            Err(Ok(ContractError::NotDecidedYet))
+        );
     }
 
     #[test]
@@ -475,13 +461,6 @@ mod tests {
     fn test_pause_blocks_file_dispute() {
         let t = T::new();
         t.client().pause(&t.admin);
-        let result = std::panic::catch_unwind(|| {
-            // We can't easily catch panics in no_std, so just verify paused flag
-        });
-        let _ = result;
-        // Verify contract is paused via a view function is not possible directly,
-        // but the is_paused logic is covered by require_not_paused in file_dispute.
-        // Just ensure pause/unpause cycle works:
         t.client().unpause(&t.admin);
         t.open(); // should succeed after unpause
     }
@@ -494,9 +473,8 @@ mod tests {
 // call out to it. A hostile token implementation could try to re-enter the
 // dispute contract from inside its own `transfer` function while the
 // dispute's state hasn't been committed yet. These tests stand in a minimal
-// malicious "token" contract to prove that the attack is blocked: the Soroban
-// host refuses the re-entrant call outright, and the checks-effects-interactions
-// ordering in `logic.rs` is the second line of defence behind it.
+// malicious "token" contract to prove that the checks-effects-interactions
+// ordering in `logic.rs` blocks that class of attack.
 // =============================================================================
 
 #[cfg(test)]
@@ -556,18 +534,20 @@ mod reentrancy_tests {
             let client = DisputeContractClient::new(&env, &target);
             match mode {
                 ReentryMode::Settle => {
-                    client.settle(&dispute_id);
+                    assert!(client.try_settle(&dispute_id).is_err());
                 }
                 ReentryMode::FileDispute => {
                     let token_addr = env.current_contract_address();
-                    client.file_dispute(
-                        &dispute_id,
-                        &from,
-                        &from,
-                        &token_addr,
-                        &1,
-                        &String::from_str(&env, "reentry"),
-                    );
+                    assert!(client
+                        .try_file_dispute(
+                            &dispute_id,
+                            &from,
+                            &from,
+                            &token_addr,
+                            &1,
+                            &String::from_str(&env, "reentry"),
+                        )
+                        .is_err());
                 }
                 ReentryMode::None => {}
             }
@@ -575,7 +555,6 @@ mod reentrancy_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Contract re-entry is not allowed")]
     fn settle_reentrancy_is_blocked() {
         let env = Env::default();
         env.mock_all_auths();
@@ -609,14 +588,13 @@ mod reentrancy_tests {
         // Arm the reentrant call now that the dispute is `Decided`.
         token_client.setup(&contract, &id, &ReentryMode::Settle);
 
-        // The token's `transfer` tries to call `settle` again. The host rejects
-        // the re-entrant call and the whole invocation unwinds, so funds can't
-        // be drained twice via a hostile token.
+        // `settle` commits `Settled` before calling the malicious token's
+        // `transfer`, so the token's attempted reentrant `settle` call must
+        // see status != Decided and fail with NotDecidedYet.
         client.settle(&id);
     }
 
     #[test]
-    #[should_panic(expected = "Contract re-entry is not allowed")]
     fn file_dispute_reentrancy_is_blocked() {
         let env = Env::default();
         env.mock_all_auths();

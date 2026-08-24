@@ -269,8 +269,13 @@ dependencies = [
 name = "bluecollar-integration"
 version = "0.1.0"
 dependencies = [
+ "bluecollar-dispute",
+ "bluecollar-escrow",
  "bluecollar-market",
  "bluecollar-registry",
+ "bluecollar-reputation",
+ "bluecollar-types",
+ "bluecollar_insurance_pool",
  "soroban-sdk",
 ]
 

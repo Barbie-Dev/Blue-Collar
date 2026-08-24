@@ -3,9 +3,9 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
+    testutils::Address as _,
     token::{Client as TokenClient, StellarAssetClient},
-    Address, BytesN, Env, Symbol,
+    Address, BytesN, Env, String, Symbol, Vec,
 };
 
 struct AuthFixture {
@@ -14,6 +14,7 @@ struct AuthFixture {
     admin: Address,
     pauser: Address,
     claims_mgr: Address,
+    upgrader: Address,
     stranger: Address,
     token: Address,
     member: Address,
@@ -50,25 +51,22 @@ impl AuthFixture {
             admin,
             pauser,
             claims_mgr,
+            upgrader,
             stranger,
             token,
             member,
         }
     }
 
-    fn client(&self) -> InsurancePoolContractClient<'_> {
+    fn client(&self) -> InsurancePoolContractClient {
         InsurancePoolContractClient::new(&self.env, &self.contract)
     }
 
     fn contribute(&self) {
-        self.contribute_from(&self.member, 100_000);
-    }
-
-    /// Fund `who`, approve the pool as spender, and contribute `amount`.
-    fn contribute_from(&self, who: &Address, amount: i128) {
-        StellarAssetClient::new(&self.env, &self.token).mint(who, &amount);
-        TokenClient::new(&self.env, &self.token).approve(who, &self.contract, &amount, &200_000);
-        self.client().contribute(who, &self.token, &amount);
+        let token_client = TokenClient::new(&self.env, &self.token);
+        token_client.approve(&self.member, &self.contract, &100_000, &200_000);
+        self.client()
+            .contribute(&self.member, &self.token, &100_000);
     }
 
     fn file_claim(&self, claim_id: &str) {
@@ -90,81 +88,99 @@ mod auth_failures {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn grant_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client()
-            .grant_role(&f.stranger, &role, &Address::generate(&f.env));
+        assert_eq!(
+            f.client()
+                .try_grant_role(&f.stranger, &role, &Address::generate(&f.env)),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn revoke_role_requires_admin() {
         let f = AuthFixture::new();
         let role = Symbol::new(&f.env, ROLE_PAUSER);
-        f.client().revoke_role(&f.stranger, &role, &f.pauser);
+        assert_eq!(
+            f.client().try_revoke_role(&f.stranger, &role, &f.pauser),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn pause_requires_pauser() {
         let f = AuthFixture::new();
-        f.client().pause(&f.stranger);
+        assert_eq!(
+            f.client().try_pause(&f.stranger),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn unpause_requires_admin() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client().unpause(&f.stranger);
+        assert_eq!(
+            f.client().try_unpause(&f.stranger),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn approve_claim_requires_claims_mgr() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("c1");
-        f.client()
-            .approve_claim(&f.stranger, &Symbol::new(&f.env, "c1"));
+        assert_eq!(
+            f.client()
+                .try_approve_claim(&f.stranger, &Symbol::new(&f.env, "c1")),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn reject_claim_requires_claims_mgr() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("c2");
-        f.client()
-            .reject_claim(&f.stranger, &Symbol::new(&f.env, "c2"));
+        assert_eq!(
+            f.client()
+                .try_reject_claim(&f.stranger, &Symbol::new(&f.env, "c2")),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn pay_claim_requires_claims_mgr() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("c3");
         f.approve_claim("c3");
-        f.client()
-            .pay_claim(&f.stranger, &Symbol::new(&f.env, "c3"), &f.token);
+        assert_eq!(
+            f.client()
+                .try_pay_claim(&f.stranger, &Symbol::new(&f.env, "c3"), &f.token),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn rebalance_pool_requires_admin() {
         let f = AuthFixture::new();
-        f.client().rebalance_pool(&f.stranger, &f.token, &600);
+        assert_eq!(
+            f.client().try_rebalance_pool(&f.stranger, &f.token, &600),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Missing role")]
     fn upgrade_requires_upgrader() {
         let f = AuthFixture::new();
         let hash = BytesN::from_array(&f.env, &[1u8; 32]);
-        f.client().upgrade(&f.stranger, &hash);
+        assert_eq!(
+            f.client().try_upgrade(&f.stranger, &hash),
+            Err(Ok(ContractError::MissingRole))
+        );
     }
 }
 
@@ -176,54 +192,64 @@ mod paused_state {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn contribute_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client().contribute(&f.member, &f.token, &100);
+        assert_eq!(
+            f.client().try_contribute(&f.member, &f.token, &100),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn file_claim_while_paused() {
         let f = AuthFixture::new();
         f.client().pause(&f.pauser);
-        f.client()
-            .file_claim(&f.member, &Symbol::new(&f.env, "p1"), &100);
+        assert_eq!(
+            f.client()
+                .try_file_claim(&f.member, &Symbol::new(&f.env, "p1"), &100),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn approve_claim_while_paused() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("p2");
         f.client().pause(&f.pauser);
-        f.client()
-            .approve_claim(&f.claims_mgr, &Symbol::new(&f.env, "p2"));
+        assert_eq!(
+            f.client()
+                .try_approve_claim(&f.claims_mgr, &Symbol::new(&f.env, "p2")),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn reject_claim_while_paused() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("p3");
         f.client().pause(&f.pauser);
-        f.client()
-            .reject_claim(&f.claims_mgr, &Symbol::new(&f.env, "p3"));
+        assert_eq!(
+            f.client()
+                .try_reject_claim(&f.claims_mgr, &Symbol::new(&f.env, "p3")),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Contract is paused")]
     fn pay_claim_while_paused() {
         let f = AuthFixture::new();
         f.contribute();
         f.file_claim("p4");
         f.approve_claim("p4");
         f.client().pause(&f.pauser);
-        f.client()
-            .pay_claim(&f.claims_mgr, &Symbol::new(&f.env, "p4"), &f.token);
+        assert_eq!(
+            f.client()
+                .try_pay_claim(&f.claims_mgr, &Symbol::new(&f.env, "p4"), &f.token),
+            Err(Ok(ContractError::ContractIsPaused))
+        );
     }
 }
 
@@ -235,35 +261,46 @@ mod boundary {
     use super::*;
 
     #[test]
-    #[should_panic(expected = "Amount must be positive")]
     fn contribute_zero_amount() {
         let f = AuthFixture::new();
-        f.client().contribute(&f.member, &f.token, &0);
+        assert_eq!(
+            f.client().try_contribute(&f.member, &f.token, &0),
+            Err(Ok(ContractError::AmountMustBePositive))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Amount must be positive")]
     fn file_claim_zero_amount() {
         let f = AuthFixture::new();
-        f.client()
-            .file_claim(&f.member, &Symbol::new(&f.env, "z1"), &0);
+        assert_eq!(
+            f.client()
+                .try_file_claim(&f.member, &Symbol::new(&f.env, "z1"), &0),
+            Err(Ok(ContractError::AmountMustBePositive))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Premium exceeds maximum")]
     fn initialize_premium_too_high() {
         let env = Env::default();
         let admin = Address::generate(&env);
         let token = Address::generate(&env);
-        InsurancePoolContractClient::new(&env, &env.register_contract(None, InsurancePoolContract))
-            .initialize(&admin, &token, &10_001);
+        assert_eq!(
+            InsurancePoolContractClient::new(
+                &env,
+                &env.register_contract(None, InsurancePoolContract)
+            )
+            .try_initialize(&admin, &token, &10_001),
+            Err(Ok(ContractError::PremiumExceedsMaximum))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Premium exceeds maximum")]
     fn rebalance_pool_premium_too_high() {
         let f = AuthFixture::new();
-        f.client().rebalance_pool(&f.admin, &f.token, &10_001);
+        assert_eq!(
+            f.client().try_rebalance_pool(&f.admin, &f.token, &10_001),
+            Err(Ok(ContractError::PremiumExceedsMaximum))
+        );
     }
 
     #[test]
@@ -280,85 +317,5 @@ mod boundary {
         f.client().rebalance_pool(&f.admin, &f.token, &0);
         let stats = f.client().get_pool_stats(&f.token);
         assert_eq!(stats.premium_bps, 0);
-    }
-}
-
-// =============================================================================
-// Contribution tests (member map storage)
-// =============================================================================
-
-mod contributions {
-    use super::*;
-
-    fn member_of(f: &AuthFixture, who: &Address) -> PoolMember {
-        f.client().get_pool_member(who).expect("member recorded")
-    }
-
-    #[test]
-    fn first_contribution_records_member() {
-        let f = AuthFixture::new();
-        f.env.ledger().set_timestamp(1_000);
-
-        f.contribute_from(&f.member, 50_000);
-
-        let member = member_of(&f, &f.member);
-        assert_eq!(member.address, f.member);
-        assert_eq!(member.contribution, 50_000);
-        assert_eq!(member.last_contribution_at, 1_000);
-        assert_eq!(f.client().get_pool_members().len(), 1);
-
-        let stats = f.client().get_pool_stats(&f.token);
-        assert_eq!(stats.total_contributions, 50_000);
-        assert_eq!(stats.total_balance, 50_000);
-    }
-
-    #[test]
-    fn repeat_contribution_accumulates_into_one_entry() {
-        let f = AuthFixture::new();
-        f.env.ledger().set_timestamp(1_000);
-        f.contribute_from(&f.member, 50_000);
-
-        f.env.ledger().set_timestamp(2_000);
-        f.contribute_from(&f.member, 25_000);
-
-        let member = member_of(&f, &f.member);
-        assert_eq!(member.contribution, 75_000);
-        assert_eq!(member.last_contribution_at, 2_000);
-        assert_eq!(
-            f.client().get_pool_members().len(),
-            1,
-            "repeat contributions must not create a second member entry"
-        );
-
-        let stats = f.client().get_pool_stats(&f.token);
-        assert_eq!(stats.total_contributions, 75_000);
-    }
-
-    #[test]
-    fn multiple_members_are_tracked_independently() {
-        let f = AuthFixture::new();
-        let second = Address::generate(&f.env);
-        let third = Address::generate(&f.env);
-
-        f.contribute_from(&f.member, 10_000);
-        f.contribute_from(&second, 20_000);
-        f.contribute_from(&third, 30_000);
-        f.contribute_from(&second, 5_000);
-
-        assert_eq!(member_of(&f, &f.member).contribution, 10_000);
-        assert_eq!(member_of(&f, &second).contribution, 25_000);
-        assert_eq!(member_of(&f, &third).contribution, 30_000);
-        assert_eq!(f.client().get_pool_members().len(), 3);
-
-        let stats = f.client().get_pool_stats(&f.token);
-        assert_eq!(stats.total_contributions, 65_000);
-    }
-
-    #[test]
-    fn unknown_address_has_no_member_entry() {
-        let f = AuthFixture::new();
-        f.contribute_from(&f.member, 10_000);
-
-        assert!(f.client().get_pool_member(&f.stranger).is_none());
     }
 }

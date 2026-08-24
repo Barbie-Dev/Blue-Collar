@@ -9,6 +9,7 @@ use soroban_sdk::{contracttype, Address, Env, String, Symbol, Vec};
 
 pub use bluecollar_types::storage::{TTL_EXTEND_TO, TTL_THRESHOLD};
 
+
 /// Dispute lifecycle phase.
 #[contracttype]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +38,7 @@ pub enum DisputeOutcome {
 
 /// On-chain dispute record.
 #[contracttype]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Dispute {
     /// Unique identifier.
     pub id: Symbol,
@@ -91,12 +92,12 @@ pub fn has_admin(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Admin)
 }
 
-/// Get the admin address. Panics if not initialized.
-pub fn get_admin(env: &Env) -> Address {
+/// Get the admin address.
+pub fn get_admin(env: &Env) -> Result<Address, bluecollar_types::ContractError> {
     env.storage()
         .instance()
         .get(&DataKey::Admin)
-        .expect("Not initialized")
+        .ok_or(bluecollar_types::ContractError::NotInitialized)
 }
 
 /// Set the admin address. Instance storage doesn't use TTL, so no extension needed.
@@ -159,6 +160,7 @@ pub fn get_dispute(env: &Env, id: &Symbol) -> Option<Dispute> {
 pub fn set_dispute(env: &Env, id: &Symbol, dispute: &Dispute) {
     let key = DataKey::Dispute(id.clone());
     env.storage().persistent().set(&key, dispute);
+    // TTL extension is done immediately after write without redundant has() check
     extend_ttl(env, &key);
 }
 
@@ -179,6 +181,7 @@ pub fn push_dispute_id(env: &Env, id: &Symbol) {
     if !list.iter().any(|x| x == *id) {
         list.push_back(id.clone());
         env.storage().persistent().set(&key, &list);
+        // TTL extension immediately after write
         extend_ttl(env, &key);
     }
 }

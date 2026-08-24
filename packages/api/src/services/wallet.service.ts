@@ -1,5 +1,6 @@
-import { db } from '../db.js'
+import { walletRepository as defaultWalletRepository } from '../repositories/wallet.repository.js'
 import { AppError, ErrorCode } from '../utils/AppError.js'
+import type { WalletServiceDeps } from '../container/types.js'
 
 const HORIZON_URL = process.env.HORIZON_URL || 'https://horizon-testnet.stellar.org'
 const FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org/bump_sequence'
@@ -13,6 +14,87 @@ function upstreamErrorCode(status: number): ErrorCode {
   if (status >= 500) return ErrorCode.SERVICE_UNAVAILABLE
   return ErrorCode.VALIDATION_ERROR
 }
+
+// ── Factory ───────────────────────────────────────────────────────────────────
+
+export function createWalletService(deps: WalletServiceDeps) {
+  const { walletRepository: repo } = deps
+
+  return {
+    /**
+     * Sync or create a Stellar account for a user.
+     * Fetches current balance and sequence from Horizon.
+     */
+    async syncStellarAccount(userId: string, publicKey: string) {
+      const accountInfo = await getAccountInfo(publicKey)
+
+      return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
+    },
+
+    /**
+     * Get cached balance for a user's Stellar account.
+     */
+    async getUserBalance(userId: string) {
+      const account = await repo.findByUserId(userId)
+
+      if (!account) {
+        throw new AppError('Stellar account not linked', 404, true, ErrorCode.NOT_FOUND)
+      }
+
+      return {
+        publicKey: account.publicKey,
+        balance: account.balance,
+        lastSyncedAt: account.lastSyncedAt,
+      }
+    },
+
+    /**
+     * Build an unsigned transaction XDR for a tip/payment.
+     */
+    async buildUnsignedTx(
+      sourcePublicKey: string,
+      destinationPublicKey: string,
+      amount: string,
+      memo?: string,
+    ) {
+      const account = await repo.findByPublicKey(sourcePublicKey)
+
+      if (!account) {
+        throw new AppError('Source account not found', 404, true, ErrorCode.NOT_FOUND)
+      }
+
+      const current = await getAccountInfo(sourcePublicKey)
+      const nextSequence = (current.sequence + BigInt(1)).toString()
+
+      return {
+        sourcePublicKey,
+        destinationPublicKey,
+        amount,
+        memo: memo || '',
+        sequence: nextSequence,
+        description: 'Use stellar-sdk to sign this transaction and then broadcast',
+      }
+    },
+
+    /**
+     * Register a user's Stellar account for the first time.
+     */
+    async linkStellarAccount(userId: string, publicKey: string) {
+      await getAccountInfo(publicKey)
+
+      const existing = await repo.findByPublicKey(publicKey)
+
+      if (existing && existing.userId !== userId) {
+        throw new AppError('Wallet already linked to another account', 409, true, ErrorCode.CONFLICT)
+      }
+
+      const accountInfo = await getAccountInfo(publicKey)
+      return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
+    },
+  }
+}
+
+// ── Standalone Horizon/network helpers (no DB involvement) ────────────────────
 
 /**
  * Fetch account balance and sequence from Horizon.
@@ -39,7 +121,6 @@ export async function getAccountInfo(publicKey: string) {
     sequence: string
   }
 
-  // Find native XLM balance
   const nativeBalance = data.balances.find((b) => b.asset_type === 'native')
   const balance = nativeBalance ? parseFloat(nativeBalance.balance) : 0
 
@@ -51,92 +132,7 @@ export async function getAccountInfo(publicKey: string) {
 }
 
 /**
- * Sync or create a Stellar account for a user.
- * Fetches current balance and sequence from Horizon.
- */
-export async function syncStellarAccount(userId: string, publicKey: string) {
-  const accountInfo = await getAccountInfo(publicKey)
-
-  return db.stellarAccount.upsert({
-    where: { publicKey },
-    update: {
-      balance: accountInfo.balance,
-      sequences: accountInfo.sequence,
-      lastSyncedAt: new Date(),
-    },
-    create: {
-      publicKey,
-      userId,
-      balance: accountInfo.balance,
-      sequences: accountInfo.sequence,
-      lastSyncedAt: new Date(),
-    },
-  })
-}
-
-/**
- * Get cached balance for a user's Stellar account.
- */
-export async function getUserBalance(userId: string) {
-  const account = await db.stellarAccount.findFirst({
-    where: { userId },
-  })
-
-  if (!account) {
-    throw new AppError('Stellar account not linked', 404, true, ErrorCode.NOT_FOUND)
-  }
-
-  return {
-    publicKey: account.publicKey,
-    balance: account.balance,
-    lastSyncedAt: account.lastSyncedAt,
-  }
-}
-
-/**
- * Build an unsigned transaction XDR for a tip/payment.
- * Returns transaction envelope that client signs and broadcasts.
- *
- * This is a helper to construct the transaction details.
- * For full XDR encoding, clients should use stellar-sdk or stellar-base.
- */
-export async function buildUnsignedTx(
-  sourcePublicKey: string,
-  destinationPublicKey: string,
-  amount: string,
-  memo?: string,
-) {
-  const account = await db.stellarAccount.findUnique({
-    where: { publicKey: sourcePublicKey },
-  })
-
-  if (!account) {
-    throw new AppError('Source account not found', 404, true, ErrorCode.NOT_FOUND)
-  }
-
-  // Fetch latest sequence to avoid gaps
-  const current = await getAccountInfo(sourcePublicKey)
-  const nextSequence = (current.sequence + BigInt(1)).toString()
-
-  // Return transaction parameters for client to build XDR
-  // Client should use stellar-sdk: new TransactionBuilder(account)
-  //   .addOperation(Operation.payment({ destination, asset, amount }))
-  //   .build()
-  return {
-    sourcePublicKey,
-    destinationPublicKey,
-    amount,
-    memo: memo || '',
-    sequence: nextSequence,
-    // Note: xdr is signed by client, not generated here
-    description: 'Use stellar-sdk to sign this transaction and then broadcast',
-  }
-}
-
-/**
  * Submit a signed XDR transaction to Stellar network.
- * @param signedXdr Base64-encoded signed transaction envelope
- * @returns Transaction hash and ID
  */
 export async function broadcastTransaction(signedXdr: string) {
   const response = await fetch(`${HORIZON_URL}/transactions`, {
@@ -155,15 +151,11 @@ export async function broadcastTransaction(signedXdr: string) {
   }
 
   const result = (await response.json()) as { hash: string; id: string }
-  return {
-    txHash: result.hash,
-    txId: result.id,
-  }
+  return { txHash: result.hash, txId: result.id }
 }
 
 /**
  * Poll transaction status from Horizon.
- * Returns status: pending | confirmed | failed
  */
 export async function pollTransactionStatus(txHash: string) {
   const response = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
@@ -191,7 +183,6 @@ export async function pollTransactionStatus(txHash: string) {
 
 /**
  * Fund testnet account via friendbot.
- * Only works on testnet — do not call on mainnet.
  */
 export async function fundTestnetAccount(publicKey: string) {
   const response = await fetch(FRIENDBOT_URL, {
@@ -215,30 +206,7 @@ export async function fundTestnetAccount(publicKey: string) {
 }
 
 /**
- * Register a user's Stellar account for the first time.
- * Links wallet to user profile and syncs balance.
- */
-export async function linkStellarAccount(userId: string, publicKey: string) {
-  // Verify account exists on network
-  await getAccountInfo(publicKey)
-
-  // Check if already linked to another user
-  const existing = await db.stellarAccount.findUnique({
-    where: { publicKey },
-  })
-
-  if (existing && existing.userId !== userId) {
-    throw new AppError('Wallet already linked to another account', 409, true, ErrorCode.CONFLICT)
-  }
-
-  return syncStellarAccount(userId, publicKey)
-}
-
-/**
  * Get transaction history for a Stellar account from Horizon.
- * @param publicKey Account's public key
- * @param limit Max results (default 50)
- * @param order Sort order: asc or desc (default desc)
  */
 export async function getAccountTransactions(
   publicKey: string,
@@ -265,3 +233,29 @@ export async function getAccountTransactions(
   return data._embedded.records
 }
 
+// ── Default service instance (backward-compatible module-level API) ───────────
+
+const _defaultService = createWalletService({
+  walletRepository: defaultWalletRepository,
+})
+
+export async function syncStellarAccount(userId: string, publicKey: string) {
+  return _defaultService.syncStellarAccount(userId, publicKey)
+}
+
+export async function getUserBalance(userId: string) {
+  return _defaultService.getUserBalance(userId)
+}
+
+export async function buildUnsignedTx(
+  sourcePublicKey: string,
+  destinationPublicKey: string,
+  amount: string,
+  memo?: string,
+) {
+  return _defaultService.buildUnsignedTx(sourcePublicKey, destinationPublicKey, amount, memo)
+}
+
+export async function linkStellarAccount(userId: string, publicKey: string) {
+  return _defaultService.linkStellarAccount(userId, publicKey)
+}

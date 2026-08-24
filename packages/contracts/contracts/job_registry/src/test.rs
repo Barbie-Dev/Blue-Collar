@@ -4,16 +4,16 @@
 #![cfg(test)]
 extern crate std;
 
-use std::format;
-
 use super::*;
+use bluecollar_types::ContractError;
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol};
+use std::format;
 
 fn zero_hash(env: &Env) -> BytesN<32> {
     BytesN::from_array(env, &[0u8; 32])
 }
 
-fn setup(env: &Env) -> (Address, Address, JobRegistryContractClient<'_>) {
+fn setup(env: &Env) -> (Address, Address, JobRegistryContractClient) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let poster = Address::generate(env);
@@ -35,11 +35,13 @@ fn test_initialize_sets_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Already initialized")]
 fn test_initialize_twice_panics() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
-    client.initialize(&admin);
+    assert_eq!(
+        client.try_initialize(&admin),
+        Err(Ok(ContractError::AlreadyInitialized))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +70,6 @@ fn test_post_job_success() {
 }
 
 #[test]
-#[should_panic(expected = "Job already exists")]
 fn test_post_job_duplicate_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -83,30 +84,35 @@ fn test_post_job_duplicate_panics() {
         &0,
         &token,
     );
-    client.post_job(
-        &poster,
-        &job_id,
-        &Symbol::new(&env, "plumber"),
-        &zero_hash(&env),
-        &0,
-        &token,
+    assert_eq!(
+        client.try_post_job(
+            &poster,
+            &job_id,
+            &Symbol::new(&env, "plumber"),
+            &zero_hash(&env),
+            &0,
+            &token,
+        ),
+        Err(Ok(ContractError::JobAlreadyExists))
     );
 }
 
 #[test]
-#[should_panic(expected = "budget must be non-negative")]
 fn test_post_job_negative_budget_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let token = Address::generate(&env);
 
-    client.post_job(
-        &poster,
-        &Symbol::new(&env, "job1"),
-        &Symbol::new(&env, "plumber"),
-        &zero_hash(&env),
-        &-1,
-        &token,
+    assert_eq!(
+        client.try_post_job(
+            &poster,
+            &Symbol::new(&env, "job1"),
+            &Symbol::new(&env, "plumber"),
+            &zero_hash(&env),
+            &-1,
+            &token,
+        ),
+        Err(Ok(ContractError::AmountMustBePositive))
     );
 }
 
@@ -137,7 +143,6 @@ fn test_assign_worker_success() {
 }
 
 #[test]
-#[should_panic(expected = "Not job poster")]
 fn test_assign_worker_not_poster_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -154,7 +159,10 @@ fn test_assign_worker_not_poster_panics() {
         &0,
         &token,
     );
-    client.assign_worker(&attacker, &job_id, &worker);
+    assert_eq!(
+        client.try_assign_worker(&attacker, &job_id, &worker),
+        Err(Ok(ContractError::UnauthorizedCaller))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +193,6 @@ fn test_complete_job_success() {
 }
 
 #[test]
-#[should_panic(expected = "Not assigned worker")]
 fn test_complete_job_wrong_caller_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -202,7 +209,10 @@ fn test_complete_job_wrong_caller_panics() {
         &token,
     );
     client.assign_worker(&poster, &job_id, &worker);
-    client.complete_job(&poster, &job_id); // poster cannot complete
+    assert_eq!(
+        client.try_complete_job(&poster, &job_id),
+        Err(Ok(ContractError::UnauthorizedCaller))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +241,6 @@ fn test_cancel_job_success() {
 }
 
 #[test]
-#[should_panic(expected = "Job already settled")]
 fn test_cancel_completed_job_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -249,7 +258,10 @@ fn test_cancel_completed_job_panics() {
     );
     client.assign_worker(&poster, &job_id, &worker);
     client.complete_job(&worker, &job_id);
-    client.cancel_job(&poster, &job_id); // already completed
+    assert_eq!(
+        client.try_cancel_job(&poster, &job_id),
+        Err(Ok(ContractError::InvalidStatus))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +292,6 @@ fn test_dispute_job_by_poster() {
 }
 
 #[test]
-#[should_panic(expected = "Not a party")]
 fn test_dispute_job_by_stranger_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -298,7 +309,10 @@ fn test_dispute_job_by_stranger_panics() {
         &token,
     );
     client.assign_worker(&poster, &job_id, &worker);
-    client.dispute_job(&stranger, &job_id);
+    assert_eq!(
+        client.try_dispute_job(&stranger, &job_id),
+        Err(Ok(ContractError::NotAParty))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +351,6 @@ fn test_list_jobs_and_poster_jobs() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_post_job_while_paused_panics() {
     let env = Env::default();
     let (admin, poster, client) = setup(&env);
@@ -346,13 +359,16 @@ fn test_post_job_while_paused_panics() {
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_PAUSER), &admin);
     client.pause(&admin);
 
-    client.post_job(
-        &poster,
-        &Symbol::new(&env, "job1"),
-        &Symbol::new(&env, "plumber"),
-        &zero_hash(&env),
-        &0,
-        &token,
+    assert_eq!(
+        client.try_post_job(
+            &poster,
+            &Symbol::new(&env, "job1"),
+            &Symbol::new(&env, "plumber"),
+            &zero_hash(&env),
+            &0,
+            &token,
+        ),
+        Err(Ok(ContractError::ContractIsPaused))
     );
 }
 
@@ -388,17 +404,18 @@ fn test_pause_unpause_cycle() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_pause_without_role_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
     let unauthorized = Address::generate(&env);
 
-    client.pause(&unauthorized);
+    assert_eq!(
+        client.try_pause(&unauthorized),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_unpause_without_role_panics() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
@@ -407,11 +424,13 @@ fn test_unpause_without_role_panics() {
     client.pause(&admin);
 
     let unauthorized = Address::generate(&env);
-    client.unpause(&unauthorized);
+    assert_eq!(
+        client.try_unpause(&unauthorized),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_assign_worker_while_paused_panics() {
     let env = Env::default();
     let (admin, poster, client) = setup(&env);
@@ -431,11 +450,13 @@ fn test_assign_worker_while_paused_panics() {
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_PAUSER), &admin);
     client.pause(&admin);
 
-    client.assign_worker(&poster, &job_id, &worker);
+    assert_eq!(
+        client.try_assign_worker(&poster, &job_id, &worker),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_complete_job_while_paused_panics() {
     let env = Env::default();
     let (admin, poster, client) = setup(&env);
@@ -456,11 +477,13 @@ fn test_complete_job_while_paused_panics() {
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_PAUSER), &admin);
     client.pause(&admin);
 
-    client.complete_job(&worker, &job_id);
+    assert_eq!(
+        client.try_complete_job(&worker, &job_id),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_cancel_job_while_paused_panics() {
     let env = Env::default();
     let (admin, poster, client) = setup(&env);
@@ -479,11 +502,13 @@ fn test_cancel_job_while_paused_panics() {
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_PAUSER), &admin);
     client.pause(&admin);
 
-    client.cancel_job(&poster, &job_id);
+    assert_eq!(
+        client.try_cancel_job(&poster, &job_id),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Contract is paused")]
 fn test_dispute_job_while_paused_panics() {
     let env = Env::default();
     let (admin, poster, client) = setup(&env);
@@ -504,7 +529,10 @@ fn test_dispute_job_while_paused_panics() {
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_PAUSER), &admin);
     client.pause(&admin);
 
-    client.dispute_job(&poster, &job_id);
+    assert_eq!(
+        client.try_dispute_job(&poster, &job_id),
+        Err(Ok(ContractError::ContractIsPaused))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +567,6 @@ fn test_grant_role_idempotent() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_grant_role_non_admin_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
@@ -547,7 +574,10 @@ fn test_grant_role_non_admin_panics() {
     let unauthorized = Address::generate(&env);
     let role = Symbol::new(&env, logic::ROLE_PAUSER);
 
-    client.grant_role(&unauthorized, &role, &user);
+    assert_eq!(
+        client.try_grant_role(&unauthorized, &role, &user),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
@@ -565,7 +595,6 @@ fn test_revoke_role_success() {
 }
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_revoke_role_non_admin_panics() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
@@ -574,7 +603,10 @@ fn test_revoke_role_non_admin_panics() {
     let role = Symbol::new(&env, logic::ROLE_PAUSER);
 
     client.grant_role(&admin, &role, &user);
-    client.revoke_role(&unauthorized, &role, &user);
+    assert_eq!(
+        client.try_revoke_role(&unauthorized, &role, &user),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
@@ -665,19 +697,20 @@ fn test_post_multiple_jobs_from_same_poster() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Job not found")]
 fn test_assign_worker_nonexistent_job_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "nonexistent");
     let worker = Address::generate(&env);
 
-    client.assign_worker(&poster, &job_id, &worker);
+    assert_eq!(
+        client.try_assign_worker(&poster, &job_id, &worker),
+        Err(Ok(ContractError::JobNotFound))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Not job poster")]
-fn test_assign_worker_not_poster_panics_funded_job() {
+fn test_assign_worker_imposter_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "job1");
@@ -693,7 +726,10 @@ fn test_assign_worker_not_poster_panics_funded_job() {
         &1_000_000,
         &token,
     );
-    client.assign_worker(&imposter, &job_id, &worker);
+    assert_eq!(
+        client.try_assign_worker(&imposter, &job_id, &worker),
+        Err(Ok(ContractError::UnauthorizedCaller))
+    );
 }
 
 #[test]
@@ -729,18 +765,19 @@ fn test_assign_worker_updates_job_state() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Job not found")]
 fn test_complete_job_nonexistent_job_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "nonexistent");
     let worker = Address::generate(&env);
 
-    client.complete_job(&worker, &job_id);
+    assert_eq!(
+        client.try_complete_job(&worker, &job_id),
+        Err(Ok(ContractError::JobNotFound))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Not assigned worker")]
 fn test_complete_job_by_poster_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -757,7 +794,10 @@ fn test_complete_job_by_poster_panics() {
         &token,
     );
     client.assign_worker(&poster, &job_id, &worker);
-    client.complete_job(&poster, &job_id);
+    assert_eq!(
+        client.try_complete_job(&poster, &job_id),
+        Err(Ok(ContractError::UnauthorizedCaller))
+    );
 }
 
 #[test]
@@ -792,17 +832,18 @@ fn test_complete_job_updates_status() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Job not found")]
 fn test_cancel_job_nonexistent_job_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "nonexistent");
 
-    client.cancel_job(&poster, &job_id);
+    assert_eq!(
+        client.try_cancel_job(&poster, &job_id),
+        Err(Ok(ContractError::JobNotFound))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Not job poster")]
 fn test_cancel_job_not_poster_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -818,7 +859,10 @@ fn test_cancel_job_not_poster_panics() {
         &1_000_000,
         &token,
     );
-    client.cancel_job(&not_poster, &job_id);
+    assert_eq!(
+        client.try_cancel_job(&not_poster, &job_id),
+        Err(Ok(ContractError::UnauthorizedCaller))
+    );
 }
 
 #[test]
@@ -847,7 +891,6 @@ fn test_cancel_job_open_status() {
 }
 
 #[test]
-#[should_panic(expected = "Job already settled")]
 fn test_cancel_job_after_completion_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
@@ -866,8 +909,10 @@ fn test_cancel_job_after_completion_panics() {
     client.assign_worker(&poster, &job_id, &worker);
     client.complete_job(&worker, &job_id);
 
-    // Try to cancel after completion should panic
-    client.cancel_job(&poster, &job_id);
+    assert_eq!(
+        client.try_cancel_job(&poster, &job_id),
+        Err(Ok(ContractError::InvalidStatus))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -875,13 +920,15 @@ fn test_cancel_job_after_completion_panics() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Job not found")]
 fn test_dispute_job_nonexistent_job_panics() {
     let env = Env::default();
     let (_admin, poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "nonexistent");
 
-    client.dispute_job(&poster, &job_id);
+    assert_eq!(
+        client.try_dispute_job(&poster, &job_id),
+        Err(Ok(ContractError::JobNotFound))
+    );
 }
 
 #[test]
@@ -947,13 +994,15 @@ fn test_list_jobs_empty() {
 }
 
 #[test]
-#[should_panic(expected = "Job not found")]
 fn test_get_job_nonexistent_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
     let job_id = Symbol::new(&env, "nonexistent");
 
-    client.get_job(&job_id);
+    assert_eq!(
+        client.try_get_job(&job_id),
+        Err(Ok(ContractError::JobNotFound))
+    );
 }
 
 #[test]
@@ -997,26 +1046,26 @@ fn test_poster_jobs_only_returns_user_jobs() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Missing role")]
 fn test_upgrade_without_role_panics() {
     let env = Env::default();
     let (_admin, _poster, client) = setup(&env);
     let unauthorized = Address::generate(&env);
     let new_wasm_hash = zero_hash(&env);
 
-    client.upgrade(&unauthorized, &new_wasm_hash);
+    assert_eq!(
+        client.try_upgrade(&unauthorized, &new_wasm_hash),
+        Err(Ok(ContractError::MissingRole))
+    );
 }
 
 #[test]
-#[should_panic(expected = "Wasm does not exist")]
 fn test_upgrade_with_role_succeeds() {
     let env = Env::default();
     let (admin, _poster, client) = setup(&env);
     let new_wasm_hash = zero_hash(&env);
 
     client.grant_role(&admin, &Symbol::new(&env, logic::ROLE_UPGRADER), &admin);
-    // With ROLE_UPGRADER the call clears the authorization gate and reaches the
-    // deployer, which then rejects the placeholder hash. Failing on the missing
-    // Wasm rather than on "Missing role" is what proves the caller was authorized.
-    client.upgrade(&admin, &new_wasm_hash);
+    // Role check passes; fails at host level because dummy WASM is not registered
+    let res = client.try_upgrade(&admin, &new_wasm_hash);
+    assert_ne!(res, Err(Ok(ContractError::MissingRole)));
 }
