@@ -6,8 +6,8 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { Request, Response } from 'express'
-import { createPaymentController } from '../../../controllers/payment.js'
-import { PaymentService } from '../../../services/payment.service.js'
+import { createPaymentController } from '../../controllers/payment.js'
+import { PaymentService } from '../../services/payment.service.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -8,8 +8,22 @@
  * See docs/DI_PATTERN.md for the full pattern guide.
  */
 
+import type { IAvailabilityRepository } from '../repositories/availability.repository.js'
+import type { IBookmarkRepository } from '../repositories/bookmark.repository.js'
+import type { IBookingRepository } from '../repositories/booking.repository.js'
 import type { ICategoryRepository } from '../repositories/category.repository.js'
+import type { IContactRequestRepository } from '../repositories/contact-request.repository.js'
+import type { IDisputeRepository } from '../repositories/dispute.repository.js'
+import type { IEscrowRepository } from '../repositories/escrow.repository.js'
+import type { IInsuranceRepository } from '../repositories/insurance.repository.js'
+import type { IJobRepository } from '../repositories/job.repository.js'
+import type { IMessagingRepository } from '../repositories/messaging.repository.js'
+import type { INotificationRepository } from '../repositories/notification.repository.js'
+import type { IReferralRepository } from '../repositories/referral.repository.js'
+import type { IReviewRepository } from '../repositories/review.repository.js'
 import type { IUserRepository } from '../repositories/user.repository.js'
+import type { IVerificationRepository } from '../repositories/verification.repository.js'
+import type { IWalletRepository } from '../repositories/wallet.repository.js'
 
 // ── Service dependency bags ───────────────────────────────────────────────────
 
@@ -46,6 +60,64 @@ export interface AuthServiceDeps {
   userRepository: IUserRepository
   mailer: IMailer
   db: IDbClient
+}
+
+// ── New domain service deps ───────────────────────────────────────────────────
+
+export interface JobServiceDeps {
+  jobRepository: IJobRepository
+}
+
+export interface BookingServiceDeps {
+  bookingRepository: IBookingRepository
+}
+
+export interface DisputeServiceDeps {
+  disputeRepository: IDisputeRepository
+}
+
+export interface ReviewServiceDeps {
+  reviewRepository: IReviewRepository
+}
+
+export interface MessagingServiceDeps {
+  messagingRepository: IMessagingRepository
+}
+
+export interface NotificationServiceDeps {
+  notificationRepository: INotificationRepository
+}
+
+export interface EscrowServiceDeps {
+  escrowRepository: IEscrowRepository
+}
+
+export interface WalletServiceDeps {
+  walletRepository: IWalletRepository
+}
+
+export interface BookmarkServiceDeps {
+  bookmarkRepository: IBookmarkRepository
+}
+
+export interface InsuranceServiceDeps {
+  insuranceRepository: IInsuranceRepository
+}
+
+export interface ReferralServiceDeps {
+  referralRepository: IReferralRepository
+}
+
+export interface VerificationServiceDeps {
+  verificationRepository: IVerificationRepository
+}
+
+export interface ContactRequestServiceDeps {
+  contactRequestRepository: IContactRequestRepository
+}
+
+export interface AvailabilityServiceDeps {
+  availabilityRepository: IAvailabilityRepository
 }
 
 // ── Mailer interface ──────────────────────────────────────────────────────────
