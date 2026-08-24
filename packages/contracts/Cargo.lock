@@ -255,7 +255,10 @@ name = "bluecollar-fuzz"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "bluecollar-dispute",
+ "bluecollar-escrow",
  "bluecollar-market",
+ "bluecollar-payment",
  "bluecollar-registry",
  "libfuzzer-sys",
  "proptest",
@@ -266,12 +269,9 @@ dependencies = [
 name = "bluecollar-integration"
 version = "0.1.0"
 dependencies = [
- "bluecollar-dispute",
- "bluecollar-escrow",
  "bluecollar-market",
  "bluecollar-registry",
- "bluecollar-reputation",
- "bluecollar_insurance_pool",
+ "bluecollar-types",
  "soroban-sdk",
 ]
 

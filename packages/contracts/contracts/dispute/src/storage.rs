@@ -39,7 +39,7 @@ pub enum DisputeOutcome {
 
 /// On-chain dispute record.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Dispute {
     /// Unique identifier.
     pub id: Symbol,
@@ -93,12 +93,12 @@ pub fn has_admin(env: &Env) -> bool {
     env.storage().instance().has(&DataKey::Admin)
 }
 
-/// Get the admin address. Panics if not initialized.
-pub fn get_admin(env: &Env) -> Address {
+/// Get the admin address.
+pub fn get_admin(env: &Env) -> Result<Address, bluecollar_types::ContractError> {
     env.storage()
         .instance()
         .get(&DataKey::Admin)
-        .expect("Not initialized")
+        .ok_or(bluecollar_types::ContractError::NotInitialized)
 }
 
 /// Set the admin address. Instance storage doesn't use TTL, so no extension needed.
@@ -147,11 +147,15 @@ pub fn set_arbitrators(env: &Env, arbitrators: &Vec<Address>) {
 // =============================================================================
 
 pub fn has_dispute(env: &Env, id: &Symbol) -> bool {
-    env.storage().persistent().has(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .has(&DataKey::Dispute(id.clone()))
 }
 
 pub fn get_dispute(env: &Env, id: &Symbol) -> Option<Dispute> {
-    env.storage().persistent().get(&DataKey::Dispute(id.clone()))
+    env.storage()
+        .persistent()
+        .get(&DataKey::Dispute(id.clone()))
 }
 
 /// Persist a dispute record and extend its TTL.

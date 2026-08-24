@@ -4,7 +4,7 @@
 //! Business logic and contract entry-points import from this module only.
 //! Keeping storage access centralised makes schema migrations straightforward.
 
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Symbol, Vec};
 
 // =============================================================================
 // TTL Constants
@@ -37,7 +37,7 @@ pub enum JobStatus {
 
 /// A single on-chain job listing.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     /// Unique job identifier.
     pub id: Symbol,
@@ -101,9 +101,7 @@ pub fn save_job_list(env: &Env, list: &Vec<Symbol>) {
 
 /// Read a single job by id. Returns `None` if not found.
 pub fn load_job(env: &Env, id: &Symbol) -> Option<Job> {
-    env.storage()
-        .persistent()
-        .get(&DataKey::Job(id.clone()))
+    env.storage().persistent().get(&DataKey::Job(id.clone()))
 }
 
 /// Write a single job record.

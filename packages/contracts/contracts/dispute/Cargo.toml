@@ -5,8 +5,7 @@ edition = "2021"
 publish = false
 
 [lib]
-# "rlib" lets the integration test crate link this contract as a Rust dependency.
-crate-type = ["cdylib", "rlib"]
+crate-type = ["lib", "cdylib"]
 
 [dependencies]
 soroban-sdk = { version = "26.1.0", features = ["alloc"] }
