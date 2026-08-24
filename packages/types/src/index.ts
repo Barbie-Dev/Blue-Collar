@@ -102,7 +102,7 @@ export interface Worker {
   locationId?: string | null;
   walletAddress?: string | null;
   categoryId?: string;
-  category?: Category;
+  category: Category;
   averageRating?: number | null;
   reviewCount?: number;
   portfolioImages?: PortfolioImage[];
