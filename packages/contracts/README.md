@@ -93,6 +93,29 @@ cd packages/contracts
 cargo test --workspace
 ```
 
+### Cross-Contract Integration Tests
+
+Per-contract tests live in each crate's `src/test.rs` and cover that contract alone. Tests that
+chain two or more contracts together live in `contracts/integration/tests/`, run against the
+in-process Soroban testnet, and deploy fresh instances per test. Shared deployment helpers are in
+`tests/common/mod.rs`; add new ones there rather than duplicating setup per file.
+
+| File | Flow covered |
+| --- | --- |
+| `e2e.rs` | Registry worker registration and status toggling; market tips with fee split; market escrow create and release; register a worker then tip them |
+| `dispute_flow.rs` | Dispute filed on locked funds, evidence from both parties, arbitrator decides a split, settlement pays each side its share; market escrow arbitration driven by the dispute contract's ruling; escrow contract dispute resolved against the worker refunds the depositor |
+| `insurance_flow.rs` | Escrowed job lost at arbitration, the covered party files an insurance claim, the claims manager approves and pays it, pool balance and claim totals reconcile |
+| `reputation_flow.rs` | Completed escrow jobs feed reviews that raise a worker's score and earn a badge; a dispute resolved against the worker slashes the score and revokes the badge |
+
+Run one flow at a time with:
+
+```bash
+cargo test -p bluecollar-integration --test dispute_flow
+```
+
+When adding a cross-contract scenario, extend the matching file if the flow fits an existing area,
+or add a new `*_flow.rs` file plus a row in this table.
+
 ### Fuzz Testing
 
 The `fuzz` crate includes property-based tests using `proptest` that verify critical contract invariants

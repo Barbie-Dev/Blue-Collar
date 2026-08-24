@@ -13,48 +13,11 @@
 
 #![cfg(test)]
 
-use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Ledger},
-    token, Address, BytesN, Env, String, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol};
 
-use bluecollar_registry::RegistryContractClient;
-use bluecollar_market::MarketContractClient;
+mod common;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn zero_hash(env: &Env) -> BytesN<32> {
-    BytesN::from_array(env, &[0u8; 32])
-}
-
-/// Deploy and initialise a fresh Registry contract.
-fn deploy_registry(env: &Env, admin: &Address) -> RegistryContractClient {
-    let contract_id = env.register_contract(None, bluecollar_registry::RegistryContract);
-    let client = RegistryContractClient::new(env, &contract_id);
-    client.initialize(admin);
-    client
-}
-
-/// Deploy a mock token (soroban-sdk built-in) and mint `amount` to `to`.
-fn deploy_token(env: &Env, admin: &Address, to: &Address, amount: i128) -> token::Client {
-    let token_id = env.register_stellar_asset_contract(admin.clone());
-    let admin_client = token::StellarAssetClient::new(env, &token_id);
-    admin_client.mint(to, &amount);
-    token::Client::new(env, &token_id)
-}
-
-/// Deploy and initialise a fresh Market contract.
-fn deploy_market(
-    env: &Env,
-    admin: &Address,
-    fee_bps: u32,
-    fee_recipient: &Address,
-) -> MarketContractClient {
-    let contract_id = env.register_contract(None, bluecollar_market::MarketContract);
-    let client = MarketContractClient::new(env, &contract_id);
-    client.initialize(admin, &fee_bps, fee_recipient);
-    client
-}
+use common::{deploy_market, deploy_registry, deploy_token, zero_hash};
 
 // ── Registry integration tests ────────────────────────────────────────────────
 
@@ -85,7 +48,7 @@ fn registry_register_and_get_worker() {
     );
 
     // Assert worker exists and is active
-    let worker = registry.get_worker(&id);
+    let worker = registry.get_worker(&id).unwrap();
     assert_eq!(worker.id, id);
     assert!(worker.is_active);
     assert_eq!(worker.owner, owner);
@@ -116,12 +79,12 @@ fn registry_toggle_active_status() {
 
     // Toggle off
     registry.toggle(&id, &owner);
-    let w = registry.get_worker(&id);
+    let w = registry.get_worker(&id).unwrap();
     assert!(!w.is_active);
 
     // Toggle back on
     registry.toggle(&id, &owner);
-    let w2 = registry.get_worker(&id);
+    let w2 = registry.get_worker(&id).unwrap();
     assert!(w2.is_active);
 }
 
@@ -268,7 +231,7 @@ fn register_worker_then_tip_end_to_end() {
     );
 
     // Verify worker is on-chain and active
-    let w = registry.get_worker(&worker_id);
+    let w = registry.get_worker(&worker_id).unwrap();
     assert!(w.is_active);
 
     // Tip the worker's wallet address

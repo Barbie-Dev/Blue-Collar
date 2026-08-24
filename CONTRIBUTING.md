@@ -76,7 +76,8 @@ This project uses [commitlint](https://commitlint.js.org/) to enforce the conven
 
 - **Local hook**: A `commit-msg` hook is installed via `pnpm prepare` (runs automatically after `pnpm install`). It validates every commit message against the rules in `commitlint.config.js` before allowing the commit.
 - **Manual check**: Run `pnpm commitlint` to validate the last commit message, or `npx commitlint --edit <file>` to validate a specific message file.
-- **CI**: The hook prevents malformed commits locally; CI does not need a separate commitlint step.
+- **CI**: The `Commit Lint` workflow re-checks every commit in a pull request, so messages that bypass the local hook (`--no-verify`, commits made in the GitHub web UI, or a clone where `pnpm install` was never run) still fail the PR. It is a required check, not advisory.
+- **PR title**: Pull requests are squash merged, so the PR title becomes the commit subject on `main`. It is linted by the same rules and must follow the convention too.
 
 If a commit is rejected with a commitlint error, fix the message and re-commit:
 
