@@ -91,7 +91,7 @@ export interface Worker {
   locationId?: string | null;
   walletAddress?: string | null;
   categoryId?: string;
-  category?: Category;
+  category: Category;
   averageRating?: number | null;
   reviewCount?: number;
   portfolioImages?: PortfolioImage[];
@@ -146,32 +146,6 @@ export interface User {
 
 // Alias for backward compatibility
 export interface AuthUser extends User {}
-
-// ─── Pagination ───────────────────────────────────────────────────────────────
-
-export interface Meta {
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
-}
-
-export interface RatingDistributionEntry {
-  rating: number;
-  count: number;
-  percentage: number;
-}
-
-// ─── API response wrappers ────────────────────────────────────────────────────
-
-/** Standard API envelope returned by all endpoints. */
-export interface ApiResponse<T> {
-  data: T;
-  meta?: Meta;
-  status: string;
-  code: number;
-  message?: string;
-}
 
 /** Paginated list response. */
 export type PaginatedResponse<T> = ApiResponse<T[]> & { meta: Meta };
@@ -239,13 +213,6 @@ export interface SdkConfig {
 
 // ─── Audit Log ──────────────────────────────────────────────────────────────
 
-export interface AuditLogEntry {
-  id: string;
-  action: string;
-  userId: string;
-  metadata: Record<string, any>;
-  createdAt: string;
-}
 export interface CreateReviewDTO {
   rating: number;
   comment?: string;

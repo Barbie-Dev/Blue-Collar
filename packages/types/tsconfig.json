@@ -18,13 +18,3 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "typeRoots": []
-  },
-  "include": ["src/**/*.ts"]
-}
