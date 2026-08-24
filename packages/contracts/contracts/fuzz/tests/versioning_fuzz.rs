@@ -2,6 +2,9 @@
 //!
 //! Ensures contract version metadata is properly exposed and maintained
 //! across upgrades and deployments.
+// `Env::register_contract` is deprecated in favour of `Env::register`; the test
+// helpers here are migrated alongside the contracts, not ahead of them.
+#![allow(deprecated)]
 
 use soroban_sdk::{testutils::Address as _, Address, Env};
 

@@ -4,12 +4,11 @@
 //! shape — plus typed get/set helpers. No validation or business rules
 //! live here; see `logic.rs`.
 
+use bluecollar_types::storage::extend_ttl;
 use soroban_sdk::{contracttype, Address, Env, String, Symbol, Vec};
 
-/// Approximate TTL extension target (~1 year at 5 s/ledger).
-pub const TTL_EXTEND_TO: u32 = 535_000;
-/// Extend TTL only when it drops below this threshold (~6 months).
-pub const TTL_THRESHOLD: u32 = 267_500;
+pub use bluecollar_types::storage::{TTL_EXTEND_TO, TTL_THRESHOLD};
+
 
 /// Dispute lifecycle phase.
 #[contracttype]
@@ -137,9 +136,7 @@ pub fn set_arbitrators(env: &Env, arbitrators: &Vec<Address>) {
     let key = DataKey::Arbitrators;
     env.storage().persistent().set(&key, arbitrators);
     // Extend TTL to prevent eviction of critical access control data
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    extend_ttl(env, &key);
 }
 
 // =============================================================================
@@ -164,9 +161,7 @@ pub fn set_dispute(env: &Env, id: &Symbol, dispute: &Dispute) {
     let key = DataKey::Dispute(id.clone());
     env.storage().persistent().set(&key, dispute);
     // TTL extension is done immediately after write without redundant has() check
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    extend_ttl(env, &key);
 }
 
 pub fn get_dispute_list(env: &Env) -> Vec<Symbol> {
@@ -187,8 +182,6 @@ pub fn push_dispute_id(env: &Env, id: &Symbol) {
         list.push_back(id.clone());
         env.storage().persistent().set(&key, &list);
         // TTL extension immediately after write
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        extend_ttl(env, &key);
     }
 }

@@ -6,7 +6,7 @@
 
 #![no_std]
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{storage::extend_ttl, ContractError};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
 };
@@ -308,7 +308,7 @@ impl ReputationContract {
         env.storage()
             .persistent()
             .set(&DataKey::Reviews(worker_id.clone()), &reviews);
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
 
         // --- Interactions ---
         env.events().publish(
@@ -337,7 +337,7 @@ impl ReputationContract {
         record.score = record.score.saturating_sub(slash_bps);
         record.last_updated = env.ledger().sequence();
         Self::save_record(&env, &worker_id, &record); // write before emit
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
 
         // --- Interactions ---
         env.events().publish(
@@ -364,7 +364,7 @@ impl ReputationContract {
         record.rating_sum = 0;
         record.last_updated = env.ledger().sequence();
         Self::save_record(&env, &worker_id, &record);
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
 
         // --- Interactions ---
         env.events()
@@ -392,7 +392,7 @@ impl ReputationContract {
         record.badges.push_back(badge.clone()); // FIX: write before emit
         record.last_updated = env.ledger().sequence();
         Self::save_record(&env, &worker_id, &record);
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
 
         // --- Interactions ---
         env.events()
@@ -423,7 +423,7 @@ impl ReputationContract {
         record.badges = updated_badges;
         record.last_updated = env.ledger().sequence();
         Self::save_record(&env, &worker_id, &record);
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
 
         // --- Interactions ---
         env.events()
@@ -464,7 +464,7 @@ impl ReputationContract {
 
     /// Extend the TTL of a worker's reputation entry (permissionless).
     pub fn extend_worker_ttl(env: Env, worker_id: Symbol) -> Result<(), ContractError> {
-        Self::extend_ttl(&env, &worker_id);
+        Self::extend_record_ttl(&env, &worker_id);
         Ok(())
     }
 
@@ -523,13 +523,8 @@ impl ReputationContract {
             .set(&DataKey::Reputation(worker_id.clone()), record);
     }
 
-    fn extend_ttl(env: &Env, worker_id: &Symbol) {
-        let key = DataKey::Reputation(worker_id.clone());
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-        }
+    fn extend_record_ttl(env: &Env, worker_id: &Symbol) {
+        extend_ttl(env, &DataKey::Reputation(worker_id.clone()));
     }
 }
 

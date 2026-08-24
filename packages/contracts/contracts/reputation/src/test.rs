@@ -10,10 +10,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{
-    testutils::{Address as _, Ledger, LedgerInfo},
-    Address, BytesN, Env, Symbol,
-};
+use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol};
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -40,23 +37,10 @@ fn setup() -> (Env, Address, Address, Address) {
     (env, admin, rep_mgr, worker)
 }
 
-fn deploy_client(env: &Env) -> (Address, ReputationContractClient) {
+fn deploy_client(env: &Env) -> (Address, ReputationContractClient<'_>) {
     let contract_id = env.register_contract(None, ReputationContract);
     let client = ReputationContractClient::new(env, &contract_id);
     (contract_id, client)
-}
-
-fn set_ledger(env: &Env, seq: u32) {
-    env.ledger().set(LedgerInfo {
-        timestamp: seq as u64 * 5,
-        protocol_version: 22,
-        sequence_number: seq,
-        network_id: Default::default(),
-        base_reserve: 10,
-        min_temp_entry_ttl: 1,
-        min_persistent_entry_ttl: 1,
-        max_entry_ttl: 1_000_000,
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +78,7 @@ fn test_initialize_twice_panics() {
 
 #[test]
 fn test_submit_review_updates_score() {
-    let (env, _admin, rep_mgr, worker) = setup();
+    let (env, _admin, rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
     let client = ReputationContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
@@ -407,7 +391,7 @@ fn test_unpause_resumes_operations() {
 
 #[test]
 fn test_grant_and_has_role() {
-    let (env, _admin, rep_mgr, _worker) = setup();
+    let (env, _admin, _rep_mgr, _worker) = setup();
     let contract_id = env.register_contract(None, ReputationContract);
     let client = ReputationContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);

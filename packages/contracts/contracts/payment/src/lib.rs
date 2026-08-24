@@ -21,7 +21,7 @@
 
 #![no_std]
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{storage::extend_ttl, ContractError};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Symbol, Vec,
 };
@@ -233,12 +233,7 @@ impl PaymentContract {
     }
 
     fn extend_payment_ttl(env: &Env, id: &Symbol) {
-        let key = DataKey::Payment(id.clone());
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-        }
+        extend_ttl(env, &DataKey::Payment(id.clone()));
     }
 
     // -------------------------------------------------------------------------

@@ -34,12 +34,12 @@ cargo test
 ```bash
 make build
 # or directly:
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32v1-none
 ```
 
 Output files:
-- `target/wasm32-unknown-unknown/release/bluecollar_market.wasm`
-- `target/wasm32-unknown-unknown/release/bluecollar_registry.wasm`
+- `target/wasm32v1-none/release/bluecollar_market.wasm`
+- `target/wasm32v1-none/release/bluecollar_registry.wasm`
 
 ### Step 3 — Install the WASM on-chain
 
@@ -48,13 +48,13 @@ Output files:
 ```bash
 # Install Market WASM
 stellar contract install \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_market.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_market.wasm \
   --source <ADMIN_IDENTITY> \
   --network testnet
 
 # Install Registry WASM
 stellar contract install \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_registry.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_registry.wasm \
   --source <ADMIN_IDENTITY> \
   --network testnet
 ```
