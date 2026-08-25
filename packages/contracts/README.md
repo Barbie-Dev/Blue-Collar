@@ -276,3 +276,4 @@ analysis, and migration pattern.
 | [INTEGRATION_GUIDE.md](./INTEGRATION_GUIDE.md) | Integrating against the deployed contracts |
 | [SECURITY.md](./SECURITY.md) | Threat model, auth table, overflow analysis |
 | [CERTIFICATION_TRACKING.md](./CERTIFICATION_TRACKING.md) | Registry's certification sub-API in depth |
+| [ADR 0001: Monorepo Package Boundaries](../../docs/adr/0001-monorepo-package-boundaries.md) | Architectural decision on monorepo package boundaries |
