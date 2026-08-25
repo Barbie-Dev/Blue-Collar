@@ -5,7 +5,7 @@
 
 #![no_std]
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{helpers, ContractError};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String,
     Symbol, Vec,
@@ -152,12 +152,8 @@ impl InsurancePoolContract {
 
     /// Require role authorization.
     fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
-        caller.require_auth();
         let members = Self::get_role_members(env, role);
-        if !members.iter().any(|m| m == *caller) {
-            return Err(ContractError::MissingRole);
-        }
-        Ok(())
+        helpers::require_role(caller, &members)
     }
 
     /// Require contract not paused.
@@ -167,10 +163,7 @@ impl InsurancePoolContract {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false);
-        if paused {
-            return Err(ContractError::ContractIsPaused);
-        }
-        Ok(())
+        helpers::require_not_paused(paused)
     }
 
     /// Grant a role to an address.

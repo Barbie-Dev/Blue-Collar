@@ -4,7 +4,7 @@
 //! All functions follow the Checks → Effects → Interactions (CEI) pattern.
 //! Token transfers (Interactions) only happen after storage is updated (Effects).
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{helpers, ContractError};
 use soroban_sdk::{symbol_short, token, Address, Env, Symbol, Vec};
 
 use crate::storage::{
@@ -47,23 +47,14 @@ pub fn role_to_id(env: &Env, role: &Symbol) -> u64 {
 
 /// Assert `caller` holds `role` and has signed the transaction.
 pub fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
-    caller.require_auth();
     let id = role_to_id(env, role);
     let members = load_role_members(env, id);
-    if members.iter().any(|m| m == *caller) {
-        Ok(())
-    } else {
-        Err(ContractError::MissingRole)
-    }
+    helpers::require_role(caller, &members)
 }
 
 /// Assert the contract is not paused.
 pub fn require_not_paused(env: &Env) -> Result<(), ContractError> {
-    if storage::is_paused(env) {
-        Err(ContractError::ContractIsPaused)
-    } else {
-        Ok(())
-    }
+    helpers::require_not_paused(storage::is_paused(env))
 }
 
 // =============================================================================
