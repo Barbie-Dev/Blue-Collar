@@ -301,11 +301,11 @@ For the full contract reference including signatures, storage maps, events, and 
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) with `wasm32-unknown-unknown` target
+- [Rust](https://rustup.rs/) with `wasm32v1-none` target
 - [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)
 
 ```bash
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 cargo install --locked stellar-cli
 ```
 
@@ -313,14 +313,14 @@ cargo install --locked stellar-cli
 
 ```bash
 cd packages/contracts
-cargo build --release --target wasm32-unknown-unknown
+cargo build --release --target wasm32v1-none
 ```
 
 ### Deploy to Testnet
 
 ```bash
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_registry.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_registry.wasm \
   --source <your-secret-key> \
   --network testnet
 ```
@@ -333,7 +333,7 @@ To upgrade a deployed contract without redeploying (preserving its contract ID a
 
 ```bash
 stellar contract install \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_registry.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_registry.wasm \
   --source <your-secret-key> \
   --network testnet
 # outputs: <new_wasm_hash>

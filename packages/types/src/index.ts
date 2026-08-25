@@ -1,11 +1,31 @@
 // ─── Core domain types ────────────────────────────────────────────────────────
 // ─── API Response Contracts ───────────────────────────────────────────────────
 
+/** Standard API envelope returned by all endpoints. */
+export interface ApiResponse<T = undefined> {
+  data?: T;
+  meta?: Meta;
+  status: "success" | "error" | string;
+  code: number;
+  message?: string;
+  token?: string;
+}
+
+export interface Meta {
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+
 /** Paginated list response. */
 export interface PaginatedResult<T> {
   data: T[];
   meta: Meta;
 }
+
+/** Paginated list response. */
+export type PaginatedResponse<T> = ApiResponse<T[]> & { meta: Meta };
 
 // ─── Auth DTOs ────────────────────────────────────────────────────────────────
 
@@ -30,8 +50,10 @@ export interface ResetPasswordDTO {
   password: string;
 }
 
-/** Authenticated user shape returned from /auth/me. */
-export interface AuthUser {
+// ─── Auth types ───────────────────────────────────────────────────────────────
+
+/** Authenticated user shape returned from /auth/me and stored in AuthContext. */
+export interface User {
   id: string;
   email: string;
   firstName: string;
@@ -40,7 +62,12 @@ export interface AuthUser {
   verified: boolean;
   avatar?: string | null;
   onboardingCompleted?: boolean;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
+
+/** Alias for backward compatibility */
+export interface AuthUser extends User {}
 
 // ─── Category ─────────────────────────────────────────────────────────────────
 
@@ -112,32 +139,9 @@ export interface Review {
   };
 }
 
-// ─── Auth types ───────────────────────────────────────────────────────────────
-
-/** Authenticated user shape returned from /auth/me and stored in AuthContext. */
-export interface User {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: "user" | "curator" | "admin";
-  verified: boolean;
-  avatar?: string | null;
-  onboardingCompleted?: boolean;
-  createdAt?: string | Date;
-  updatedAt?: string | Date;
-}
-
-// Alias for backward compatibility
-export interface AuthUser extends User {}
-
-// ─── Pagination ───────────────────────────────────────────────────────────────
-
-export interface Meta {
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
+export interface CreateReviewDTO {
+  rating: number;
+  comment?: string;
 }
 
 export interface RatingDistributionEntry {
@@ -145,21 +149,6 @@ export interface RatingDistributionEntry {
   count: number;
   percentage: number;
 }
-
-// ─── API response wrappers ────────────────────────────────────────────────────
-
-/** Standard API envelope returned by all endpoints. */
-export interface ApiResponse<T = undefined> {
-  status: "success" | "error";
-  message: string;
-  code: number;
-  data?: T;
-  meta?: Meta;
-  token?: string;
-}
-
-/** Paginated list response. */
-export type PaginatedResponse<T> = ApiResponse<T[]> & { meta: Meta };
 
 // ─── Form types ───────────────────────────────────────────────────────────────
 
@@ -220,11 +209,6 @@ export interface SdkConfig {
   registryContractId?: string;
   marketContractId?: string;
   network: 'testnet' | 'mainnet';
-}
-
-export interface CreateReviewDTO {
-  rating: number;
-  comment?: string;
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -340,12 +324,6 @@ export interface WorkerAnalytics {
   avgRating: number;
   reviewCount: number;
   updatedAt: string | null;
-}
-
-export interface RatingDistributionEntry {
-  rating: number;
-  count: number;
-  percentage: number;
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────────────

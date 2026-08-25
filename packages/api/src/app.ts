@@ -40,7 +40,12 @@ import walletRoutes from './routes/wallet.js'
 import workerEventsRoutes from './routes/workerEvents.js'
 import { auditMiddleware } from './middleware/audit.js'
 import { sanitize, sanitizeParams } from './middleware/sanitize.js'
-import { versionMiddleware, deprecationWarning, versionDeprecationMiddleware } from './middleware/version.js'
+import {
+  VERSION_CONFIG,
+  versionMiddleware,
+  deprecationWarning,
+  versionDeprecationMiddleware,
+} from './middleware/version.js'
 import { responseSchemaVersioning } from './utils/schemaVersioning.js'
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js'
 import { metricsHandler as metricsEndpoint, metricsMiddleware } from './middleware/metrics.js'
@@ -96,7 +101,7 @@ app.use('/api/workers', insuranceRoutes)
 app.use('/api/referrals', referralRoutes)
 app.use('/api/analytics', analyticsRoutes)
 app.use('/api/payments', paymentRoutes)
-app.use('/api/bookings', bookingRoutes)
+app.use('/api/bookings', bookingsRoutes)
 app.use('/api/jobs', jobRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/reviews', helpfulRoutes)
@@ -127,7 +132,7 @@ app.use('/api/v1', responseTimeRoutes)
 app.use('/api/v1/workers', insuranceRoutes)
 app.use('/api/v1/referrals', referralRoutes)
 app.use('/api/v1/payments', paymentRoutes)
-app.use('/api/v1/bookings', bookingRoutes)
+app.use('/api/v1/bookings', bookingsRoutes)
 app.use('/api/v1/jobs', jobRoutes)
 app.use('/api/v1/notifications', notificationRoutes)
 app.use('/api/v1/reviews', helpfulRoutes)

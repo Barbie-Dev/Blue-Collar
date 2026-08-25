@@ -26,7 +26,7 @@ releases (distinct from the WASM upgrade mechanics below).
 | Rust (stable) | **1.74.0** | Soroban SDK 26.x requires this edition and feature set |
 | soroban-sdk | **26.1.0** | All contracts pin to this version for ABI consistency |
 | Stellar CLI | **21.x** | Used for `stellar contract deploy / invoke / install` |
-| wasm32-unknown-unknown | (bundled with Rust) | Added via `rustup target add wasm32-unknown-unknown` |
+| wasm32v1-none | (bundled with Rust) | Added via `rustup target add wasm32v1-none` |
 
 > All member crates in the workspace declare `soroban-sdk = "26.1.0"` (except the
 > `fuzz` crate which also accepts `"26.1.0"`). Do **not** mix SDK versions across
@@ -39,7 +39,7 @@ releases (distinct from the WASM upgrade mechanics below).
 
 ```bash
 # Rust + wasm target
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 
 # Stellar CLI
 cargo install --locked stellar-cli
@@ -64,7 +64,7 @@ make build-registry
 make build-market
 ```
 
-WASM outputs land in `target/wasm32-unknown-unknown/release/`.
+WASM outputs land in `target/wasm32v1-none/release/`.
 
 ## Coverage
 
@@ -92,6 +92,29 @@ Run the standard test suite:
 cd packages/contracts
 cargo test --workspace
 ```
+
+### Cross-Contract Integration Tests
+
+Per-contract tests live in each crate's `src/test.rs` and cover that contract alone. Tests that
+chain two or more contracts together live in `contracts/integration/tests/`, run against the
+in-process Soroban testnet, and deploy fresh instances per test. Shared deployment helpers are in
+`tests/common/mod.rs`; add new ones there rather than duplicating setup per file.
+
+| File | Flow covered |
+| --- | --- |
+| `e2e.rs` | Registry worker registration and status toggling; market tips with fee split; market escrow create and release; register a worker then tip them |
+| `dispute_flow.rs` | Dispute filed on locked funds, evidence from both parties, arbitrator decides a split, settlement pays each side its share; market escrow arbitration driven by the dispute contract's ruling; escrow contract dispute resolved against the worker refunds the depositor |
+| `insurance_flow.rs` | Escrowed job lost at arbitration, the covered party files an insurance claim, the claims manager approves and pays it, pool balance and claim totals reconcile |
+| `reputation_flow.rs` | Completed escrow jobs feed reviews that raise a worker's score and earn a badge; a dispute resolved against the worker slashes the score and revokes the badge |
+
+Run one flow at a time with:
+
+```bash
+cargo test -p bluecollar-integration --test dispute_flow
+```
+
+When adding a cross-contract scenario, extend the matching file if the flow fits an existing area,
+or add a new `*_flow.rs` file plus a row in this table.
 
 ### Fuzz Testing
 
@@ -197,7 +220,7 @@ Upgrades preserve the contract ID and all storage.
 ```bash
 # 1. Install new WASM, get its hash
 stellar contract install \
-  --wasm target/wasm32-unknown-unknown/release/bluecollar_registry.wasm \
+  --wasm target/wasm32v1-none/release/bluecollar_registry.wasm \
   --source <admin-key> \
   --network testnet
 # → <new_wasm_hash>
