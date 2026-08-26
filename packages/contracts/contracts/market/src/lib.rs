@@ -19,7 +19,7 @@
 
 #![no_std]
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{helpers, ContractError};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, token, Address, Env, Symbol, Vec,
 };
@@ -288,12 +288,8 @@ impl MarketContract {
 
     /// Assert that `caller` holds `role` and has authorised this call.
     fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
-        caller.require_auth();
         let members = Self::get_role_members(env, role);
-        if !members.iter().any(|m| m == *caller) {
-            return Err(ContractError::MissingRole);
-        }
-        Ok(())
+        helpers::require_role(caller, &members)
     }
 
     /// Create a role symbol (gas-optimization helper, mirrors the registry contract).
@@ -385,10 +381,7 @@ impl MarketContract {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false);
-        if paused {
-            return Err(ContractError::ContractIsPaused);
-        }
-        Ok(())
+        helpers::require_not_paused(paused)
     }
 
     /// Pause the contract, blocking all state-mutating operations.

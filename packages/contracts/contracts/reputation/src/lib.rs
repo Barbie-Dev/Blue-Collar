@@ -6,7 +6,7 @@
 
 #![no_std]
 
-use bluecollar_types::{storage::extend_ttl, ContractError};
+use bluecollar_types::{helpers, storage::extend_ttl, ContractError};
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
 };
@@ -154,25 +154,17 @@ impl ReputationContract {
 
     /// Assert `caller` holds `role` and has authorised this transaction.
     fn require_role(env: &Env, role: &Symbol, caller: &Address) -> Result<(), ContractError> {
-        // Checks: auth first, then membership
-        caller.require_auth();
         let members = Self::get_role_members(env, role);
-        if !members.iter().any(|m| m == *caller) {
-            return Err(ContractError::MissingRole);
-        }
-        Ok(())
+        helpers::require_role(caller, &members)
     }
 
     fn require_not_paused(env: &Env) -> Result<(), ContractError> {
-        if env
+        let paused: bool = env
             .storage()
             .instance()
             .get::<_, bool>(&DataKey::Paused)
-            .unwrap_or(false)
-        {
-            return Err(ContractError::ContractIsPaused);
-        }
-        Ok(())
+            .unwrap_or(false);
+        helpers::require_not_paused(paused)
     }
 
     // -------------------------------------------------------------------------

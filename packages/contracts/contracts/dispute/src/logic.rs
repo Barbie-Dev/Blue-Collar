@@ -2,7 +2,7 @@
 //! and token movement. Storage access goes through `storage.rs`; entrypoints
 //! in `lib.rs` are thin wrappers around these functions.
 
-use bluecollar_types::ContractError;
+use bluecollar_types::{helpers, ContractError};
 use soroban_sdk::{symbol_short, token, Address, Env, String, Symbol, Vec};
 
 use crate::storage::{self, Dispute, DisputeOutcome, DisputeStatus};
@@ -28,19 +28,12 @@ pub fn initialize(env: &Env, admin: &Address) -> Result<(), ContractError> {
 // =============================================================================
 
 pub fn require_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
-    caller.require_auth();
     let admin = storage::get_admin(env)?;
-    if *caller != admin {
-        return Err(ContractError::NotAuthorized);
-    }
-    Ok(())
+    helpers::require_admin(caller, &admin)
 }
 
 pub fn require_not_paused(env: &Env) -> Result<(), ContractError> {
-    if storage::is_paused(env) {
-        return Err(ContractError::ContractIsPaused);
-    }
-    Ok(())
+    helpers::require_not_paused(storage::is_paused(env))
 }
 
 // =============================================================================
