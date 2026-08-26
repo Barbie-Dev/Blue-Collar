@@ -5,15 +5,10 @@ import type { ReactNode, ChangeEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, Loader2, CheckCircle2, AlertCircle, ExternalLink, Zap } from "lucide-react";
 import { useTranslations } from "next-intl";
-import {
-  isConnected,
-  requestAccess,
-  getAddress,
-  signTransaction,
-} from "@stellar/freighter-api";
+import { useWallet, FreighterNotInstalledError, WalletNotConnectedError } from "@/hooks/useWallet";
 import { cn } from "@/lib/utils";
 
-const NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
+const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
 const SOROBAN_RPC = "https://soroban-testnet.stellar.org";
 const STROOPS_PER_XLM = 10_000_000n;
@@ -31,6 +26,7 @@ interface Props {
 
 export default function TipModal({ workerName, walletAddress, trigger }: Props) {
   const t = useTranslations("tip");
+  const { publicKey, networkPassphrase, connect, signTransaction } = useWallet();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [selectedToken, setSelectedToken] = useState("XLM");
@@ -67,8 +63,11 @@ export default function TipModal({ workerName, walletAddress, trigger }: Props) 
     let failureType: ErrorType | null = null;
 
     try {
-      const connected = await isConnected();
-      if (!connected.isConnected) {
+      let senderAddress = publicKey;
+      if (!senderAddress) {
+        senderAddress = await connect();
+      }
+      if (!senderAddress) {
         setErrorType("freighter_missing");
         setErrorMsg(t("freighterNotFound"));
         setStatus("error");
@@ -76,11 +75,10 @@ export default function TipModal({ workerName, walletAddress, trigger }: Props) 
       }
 
       setStatus("pending");
-      await requestAccess();
-      const { address: senderAddress } = await getAddress();
 
+      const passphrase = networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE;
       const amountInStroops = BigInt(Math.round(Number(amount) * Number(STROOPS_PER_XLM)));
-      const txXdr = await buildTipTxXdr(senderAddress, walletAddress, amountInStroops);
+      const txXdr = await buildTipTxXdr(senderAddress, walletAddress, amountInStroops, passphrase);
 
       const buildRes = await fetch(`${SOROBAN_RPC}`, {
         method: "POST",
@@ -102,9 +100,7 @@ export default function TipModal({ workerName, walletAddress, trigger }: Props) 
         throw new Error(errMsg);
       }
 
-      const { signedTxXdr } = await signTransaction(txXdr, {
-        networkPassphrase: NETWORK_PASSPHRASE,
-      });
+      const signedTxXdr = await signTransaction(txXdr);
 
       const submitRes = await fetch(`${HORIZON_URL}/transactions`, {
         method: "POST",
@@ -120,6 +116,12 @@ export default function TipModal({ workerName, walletAddress, trigger }: Props) 
       setTxHash(submitJson.hash);
       setStatus("success");
     } catch (err: unknown) {
+      if (err instanceof FreighterNotInstalledError || err instanceof WalletNotConnectedError) {
+        setErrorType("freighter_missing");
+        setErrorMsg(t("freighterNotFound"));
+        setStatus("error");
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Unknown error";
       setErrorMsg(msg);
       setErrorType(failureType ?? "unknown");
@@ -378,7 +380,8 @@ export default function TipModal({ workerName, walletAddress, trigger }: Props) 
 async function buildTipTxXdr(
   from: string,
   to: string,
-  amountStroops: bigint
+  amountStroops: bigint,
+  networkPassphrase: string
 ): Promise<string> {
   const StellarSdk = await import("@stellar/stellar-sdk");
   const { Server, TransactionBuilder, Operation, Asset, BASE_FEE } = StellarSdk;
@@ -388,7 +391,7 @@ async function buildTipTxXdr(
 
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
-    networkPassphrase: NETWORK_PASSPHRASE,
+    networkPassphrase,
   })
     .addOperation(
       Operation.payment({
