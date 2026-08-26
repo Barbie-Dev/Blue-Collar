@@ -44,7 +44,7 @@ export function DeleteWorkerDialog({
                 </Dialog.Description>
               </div>
             </div>
-            <Dialog.Close className="rounded-md p-1 text-gray-400 hover:text-gray-600">
+            <Dialog.Close aria-label="Close" className="rounded-md p-1 text-gray-400 hover:text-gray-600">
               <X size={16} />
             </Dialog.Close>
           </div>
