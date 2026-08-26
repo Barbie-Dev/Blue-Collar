@@ -19,7 +19,7 @@ async function fetchWorker(id: string): Promise<Worker | null> {
   const res = await fetch(`${API}/workers/${id}`, { cache: "no-store" });
   if (!res.ok) return null;
   const json: ApiResponse<Worker> = await res.json();
-  return json.data;
+  return json.data ?? null;
 }
 
 async function fetchReviews(id: string) {

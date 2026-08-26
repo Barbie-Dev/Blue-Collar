@@ -47,7 +47,8 @@ export default function DashboardPage() {
   // ── Tab + delete state ───────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"workers" | "analytics">("workers");
   const [deleteTarget, setDeleteTarget] = useState<DashboardWorker | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const toggleWorker = useToggleWorker();
+  const deleteWorker = useDeleteWorker();
 
   // ── Auth guard ───────────────────────────────────────────────────────────
   useEffect(() => {
