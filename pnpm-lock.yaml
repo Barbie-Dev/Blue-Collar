@@ -398,6 +398,8 @@ importers:
 
   packages/contracts: {}
 
+  packages/contracts: {}
+
   packages/mobile:
     dependencies:
       '@bluecollar/types':
@@ -5299,6 +5301,9 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
+  '@types/normalize-package-data@2.4.4':
+    resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+
   '@types/oauth@0.9.6':
     resolution: {integrity: sha512-H9TRCVKBNOhZZmyHLqFt9drPM9l+ShWiqqJijU1B8P3DX3ub84NjxDuy+Hjrz+fEca5Kwip3qPMKNyiLgNJtIA==}
 
@@ -8360,6 +8365,12 @@ packages:
     deprecated: Deprecated and no longer maintained. Use @conventional-changelog/git-client instead.
     hasBin: true
 
+  git-raw-commits@2.0.11:
+    resolution: {integrity: sha512-VnctFhw+xfj8Va1xtfEqCUD2XDrbAPSJx+hSrE5K7fGdjZruW7XV+QOrN7LF/RJyvspRiD2I0asWsxFp0ya26A==}
+    engines: {node: '>=10'}
+    deprecated: Deprecated and no longer maintained. Use @conventional-changelog/git-client instead.
+    hasBin: true
+
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
     engines: {node: '>= 6'}
@@ -8523,6 +8534,9 @@ packages:
 
   hmac-drbg@1.0.1:
     resolution: {integrity: sha512-Tti3gMqLdZfhOQY1Mzf/AanLiqh1WTiJgEj26ZuYQ9fbkLomzGchCws4FyrSd4VkpBfiNhaE1On+lOz894jvXg==}
+
+  hosted-git-info@2.8.9:
+    resolution: {integrity: sha512-mxIDAb9Lsm6DoOJ7xH+5+X4y1LU/4Hi50L9C5sIswK3JzULS4bwk1FvjdBgvYR4bzT4tuUQiC15FE2f5HbLvYw==}
 
   hosted-git-info@2.8.9:
     resolution: {integrity: sha512-mxIDAb9Lsm6DoOJ7xH+5+X4y1LU/4Hi50L9C5sIswK3JzULS4bwk1FvjdBgvYR4bzT4tuUQiC15FE2f5HbLvYw==}
@@ -14458,6 +14472,103 @@ snapshots:
     dependencies:
       chalk: 4.1.2
 
+  '@commitlint/config-conventional@18.6.3':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      conventional-changelog-conventionalcommits: 7.0.2
+
+  '@commitlint/config-validator@18.6.1':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      ajv: 8.20.0
+
+  '@commitlint/ensure@18.6.1':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      lodash.camelcase: 4.3.0
+      lodash.kebabcase: 4.1.1
+      lodash.snakecase: 4.1.1
+      lodash.startcase: 4.4.0
+      lodash.upperfirst: 4.3.1
+
+  '@commitlint/execute-rule@18.6.1': {}
+
+  '@commitlint/format@18.6.1':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      chalk: 4.1.2
+
+  '@commitlint/is-ignored@18.6.1':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      semver: 7.6.0
+
+  '@commitlint/lint@18.6.1':
+    dependencies:
+      '@commitlint/is-ignored': 18.6.1
+      '@commitlint/parse': 18.6.1
+      '@commitlint/rules': 18.6.1
+      '@commitlint/types': 18.6.1
+
+  '@commitlint/load@18.6.1(@types/node@22.19.15)(typescript@5.9.3)':
+    dependencies:
+      '@commitlint/config-validator': 18.6.1
+      '@commitlint/execute-rule': 18.6.1
+      '@commitlint/resolve-extends': 18.6.1
+      '@commitlint/types': 18.6.1
+      chalk: 4.1.2
+      cosmiconfig: 8.3.6(typescript@5.9.3)
+      cosmiconfig-typescript-loader: 5.1.0(@types/node@22.19.15)(cosmiconfig@8.3.6(typescript@5.9.3))(typescript@5.9.3)
+      lodash.isplainobject: 4.0.6
+      lodash.merge: 4.6.2
+      lodash.uniq: 4.5.0
+      resolve-from: 5.0.0
+    transitivePeerDependencies:
+      - '@types/node'
+      - typescript
+
+  '@commitlint/message@18.6.1': {}
+
+  '@commitlint/parse@18.6.1':
+    dependencies:
+      '@commitlint/types': 18.6.1
+      conventional-changelog-angular: 7.0.0
+      conventional-commits-parser: 5.0.0
+
+  '@commitlint/read@18.6.1':
+    dependencies:
+      '@commitlint/top-level': 18.6.1
+      '@commitlint/types': 18.6.1
+      git-raw-commits: 2.0.11
+      minimist: 1.2.8
+
+  '@commitlint/resolve-extends@18.6.1':
+    dependencies:
+      '@commitlint/config-validator': 18.6.1
+      '@commitlint/types': 18.6.1
+      import-fresh: 3.3.1
+      lodash.mergewith: 4.6.2
+      resolve-from: 5.0.0
+      resolve-global: 1.0.0
+
+  '@commitlint/rules@18.6.1':
+    dependencies:
+      '@commitlint/ensure': 18.6.1
+      '@commitlint/message': 18.6.1
+      '@commitlint/to-lines': 18.6.1
+      '@commitlint/types': 18.6.1
+      execa: 5.1.1
+
+  '@commitlint/to-lines@18.6.1': {}
+
+  '@commitlint/top-level@18.6.1':
+    dependencies:
+      find-up: 5.0.0
+
+  '@commitlint/types@18.6.1':
+    dependencies:
+      chalk: 4.1.2
+
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
@@ -18915,6 +19026,8 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
+  '@types/normalize-package-data@2.4.4': {}
+
   '@types/oauth@0.9.6':
     dependencies:
       '@types/node': 22.20.1
@@ -22999,6 +23112,14 @@ snapshots:
       split2: 3.2.2
       through2: 4.0.2
 
+  git-raw-commits@2.0.11:
+    dependencies:
+      dargs: 7.0.0
+      lodash: 4.17.21
+      meow: 8.1.2
+      split2: 3.2.2
+      through2: 4.0.2
+
   glob-parent@5.1.2:
     dependencies:
       is-glob: 4.0.3
@@ -23177,6 +23298,8 @@ snapshots:
       hash.js: 1.1.7
       minimalistic-assert: 1.0.1
       minimalistic-crypto-utils: 1.0.1
+
+  hosted-git-info@2.8.9: {}
 
   hosted-git-info@2.8.9: {}
 
@@ -24902,6 +25025,12 @@ snapshots:
   minimatch@9.0.9:
     dependencies:
       brace-expansion: 2.1.4
+
+  minimist-options@4.1.0:
+    dependencies:
+      arrify: 1.0.1
+      is-plain-obj: 1.1.0
+      kind-of: 6.0.3
 
   minimist-options@4.1.0:
     dependencies:
