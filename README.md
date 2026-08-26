@@ -29,6 +29,7 @@ Many skilled workers lack a platform to help them get noticed. Meanwhile, countl
 - [API Reference](#api-reference)
 - [Smart Contracts](#smart-contracts)
 - [Getting Started](#getting-started)
+- [Local Developer Setup Guide](docs/architecture/setup.md)
 - [Environment Variables](#environment-variables)
 - [Production Deployment](#production-deployment)
 - [Status Page](#status-page)
@@ -407,10 +408,10 @@ pnpm docker:down
 
 ## Getting Started
 
-> This section is a quick-start for `api` + `app` only. For a single guide covering
+> This section is a quick-start for `api` + `app` only. For the authoritative guide covering
 > every package — `api`, `app`, `contracts`, `sdk`, `mobile`, `monitoring`, `types` —
-> plus environment variables and local Soroban/Stellar network setup, see
-> [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md).
+> plus environment variables, database, and local Soroban/Stellar network setup, see the
+> **[Local Developer Setup Guide](docs/architecture/setup.md)**.
 
 ### Prerequisites
 
