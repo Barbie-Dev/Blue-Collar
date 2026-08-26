@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { useUpdateAccount, useChangePassword, useDeleteAccount } from "@/hooks/queries";
+import { validateUserProfile, validatePassword, validateRequired } from "@/utils/validation";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
 
 interface UserProfile {
   firstName: string;
@@ -58,14 +60,7 @@ export default function ProfileSettingsPage() {
   }, [user]);
 
   const validateProfile = () => {
-    const errors: Partial<UserProfile> = {};
-
-    if (!profile.firstName.trim()) errors.firstName = "First name is required";
-    if (!profile.lastName.trim()) errors.lastName = "Last name is required";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)) {
-      errors.email = "Enter a valid email";
-    }
-
+    const errors = validateUserProfile(profile);
     setProfileErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -82,13 +77,15 @@ export default function ProfileSettingsPage() {
     });
   };
 
-  const handlePasswordChange = () => {
-    if (!currentPassword) {
-      setPasswordError("Current password is required.");
+  const handlePasswordChange = async () => {
+    const currErr = validateRequired(currentPassword, "Current password");
+    if (currErr) {
+      setPasswordError(currErr);
       return;
     }
-    if (newPassword.length < 8) {
-      setPasswordError("New password must be at least 8 characters.");
+    const newPwdErr = validatePassword(newPassword, 8, true);
+    if (newPwdErr) {
+      setPasswordError(newPwdErr);
       return;
     }
 
