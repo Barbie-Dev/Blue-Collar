@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import LoadingState from "@/components/LoadingState";
@@ -54,6 +54,30 @@ function isMarketPayment(record: HorizonPayment, publicKey: string) {
 
   return !MARKET_CONTRACT_ID || record.to === MARKET_CONTRACT_ID;
 }
+
+const TransactionRow = memo(function TransactionRow({ item }: { item: HistoryItem }) {
+  return (
+    <tr className="border-b last:border-0">
+      <td className="whitespace-nowrap px-6 py-4 text-gray-600">
+        {new Date(item.date).toLocaleString()}
+      </td>
+      <td className="px-6 py-4 font-mono text-gray-700">{truncate(item.recipient)}</td>
+      <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
+        {formatAmount(item.amount)} XLM
+      </td>
+      <td className="px-6 py-4">
+        <a
+          href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${item.hash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
+        >
+          View <ExternalLink size={14} />
+        </a>
+      </td>
+    </tr>
+  );
+});
 
 export default function TransactionHistory({ publicKey }: { publicKey: string }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
@@ -113,21 +137,25 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
     [items]
   );
 
-  const goNext = () => {
+  const goNext = useCallback(() => {
     if (!nextCursor) return;
     setCursorStack((stack) => [...stack, cursor]);
     setCursor(nextCursor);
     void loadPage(nextCursor);
-  };
+  }, [nextCursor, cursor, loadPage]);
 
-  const goPrevious = () => {
+  const goPrevious = useCallback(() => {
     setCursorStack((stack) => {
       const previous = stack.at(-1) ?? null;
       setCursor(previous);
       void loadPage(previous);
       return stack.slice(0, -1);
     });
-  };
+  }, [loadPage]);
+
+  const refresh = useCallback(() => {
+    void loadPage(cursor);
+  }, [loadPage, cursor]);
 
   return (
     <section className="rounded-xl border bg-white shadow-sm">
@@ -136,7 +164,7 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
           <h2 className="text-lg font-semibold text-gray-900">On-chain activity</h2>
           <p className="mt-1 font-mono text-xs text-gray-500">{truncate(publicKey)}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => loadPage(cursor)} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
           {loading ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RefreshCw size={15} className="mr-2" />}
           Refresh
         </Button>
@@ -185,25 +213,7 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={item.id} className="border-b last:border-0">
-                  <td className="whitespace-nowrap px-6 py-4 text-gray-600">
-                    {new Date(item.date).toLocaleString()}
-                  </td>
-                  <td className="px-6 py-4 font-mono text-gray-700">{truncate(item.recipient)}</td>
-                  <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
-                    {formatAmount(item.amount)} XLM
-                  </td>
-                  <td className="px-6 py-4">
-                    <a
-                      href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${item.hash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
-                    >
-                      View <ExternalLink size={14} />
-                    </a>
-                  </td>
-                </tr>
+                <TransactionRow key={item.id} item={item} />
               ))}
             </tbody>
           </table>
