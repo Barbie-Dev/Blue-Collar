@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw } from "luc
 import { Button } from "@/components/ui/button";
 import LoadingState from "@/components/LoadingState";
 import ErrorState from "@/components/ErrorState";
+import { formatStellarAddress } from "@/lib/utils";
 
 const DEFAULT_LIMIT = 10;
 const MARKET_CONTRACT_ID = process.env.NEXT_PUBLIC_MARKET_CONTRACT_ID ?? "";
@@ -36,11 +37,6 @@ type HistoryItem = {
   date: string;
   hash: string;
 };
-
-function truncate(value: string) {
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 6)}...${value.slice(-6)}`;
-}
 
 function formatAmount(amount: string) {
   const parsed = Number(amount);
@@ -134,7 +130,7 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
       <div className="flex flex-col gap-3 border-b p-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">On-chain activity</h2>
-          <p className="mt-1 font-mono text-xs text-gray-500">{truncate(publicKey)}</p>
+          <p className="mt-1 font-mono text-xs text-gray-500">{formatStellarAddress(publicKey, { prefixLength: 6, suffixLength: 6 })}</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => loadPage(cursor)} disabled={loading}>
           {loading ? <Loader2 size={15} className="mr-2 animate-spin" /> : <RefreshCw size={15} className="mr-2" />}
@@ -152,7 +148,7 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
         <div className="sm:text-right">
           <p className="text-xs font-medium uppercase text-gray-400">Market contract</p>
           <p className="mt-1 font-mono text-sm text-gray-600">
-            {MARKET_CONTRACT_ID ? truncate(MARKET_CONTRACT_ID) : "Not configured"}
+            {MARKET_CONTRACT_ID ? formatStellarAddress(MARKET_CONTRACT_ID, { prefixLength: 6, suffixLength: 6 }) : "Not configured"}
           </p>
         </div>
       </div>
@@ -189,7 +185,7 @@ export default function TransactionHistory({ publicKey }: { publicKey: string })
                   <td className="whitespace-nowrap px-6 py-4 text-gray-600">
                     {new Date(item.date).toLocaleString()}
                   </td>
-                  <td className="px-6 py-4 font-mono text-gray-700">{truncate(item.recipient)}</td>
+                  <td className="px-6 py-4 font-mono text-gray-700">{formatStellarAddress(item.recipient, { prefixLength: 6, suffixLength: 6 })}</td>
                   <td className="whitespace-nowrap px-6 py-4 font-medium text-gray-900">
                     {formatAmount(item.amount)} XLM
                   </td>
