@@ -65,7 +65,7 @@ export async function exportWorkers(req: Request, res: Response) {
 
   res.setHeader('Content-Type', 'application/json')
   res.setHeader('Content-Disposition', 'attachment; filename="workers.json"')
-  return res.json({ data: rows, count: rows.length })
+  return res.json({ status: 'success', code: 200, data: rows, meta: { count: rows.length } })
 }
 
 export async function exportUsers(req: Request, res: Response) {
@@ -110,5 +110,5 @@ export async function exportUsers(req: Request, res: Response) {
 
   res.setHeader('Content-Type', 'application/json')
   res.setHeader('Content-Disposition', 'attachment; filename="users.json"')
-  return res.json({ data: rows, count: rows.length })
+  return res.json({ status: 'success', code: 200, data: rows, meta: { count: rows.length } })
 }

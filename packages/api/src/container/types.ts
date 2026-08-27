@@ -24,6 +24,7 @@ import type { IReviewRepository } from '../repositories/review.repository.js'
 import type { IUserRepository } from '../repositories/user.repository.js'
 import type { IVerificationRepository } from '../repositories/verification.repository.js'
 import type { IWalletRepository } from '../repositories/wallet.repository.js'
+import type { StellarClient } from '../clients/stellar.client.js'
 
 // ── Service dependency bags ───────────────────────────────────────────────────
 
@@ -93,7 +94,8 @@ export interface EscrowServiceDeps {
 }
 
 export interface WalletServiceDeps {
-  walletRepository: IWalletRepository
+  walletRepository?: IWalletRepository
+  stellarClient?: StellarClient
 }
 
 export interface BookmarkServiceDeps {

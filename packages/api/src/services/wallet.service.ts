@@ -1,24 +1,23 @@
 import { walletRepository as defaultWalletRepository } from '../repositories/wallet.repository.js'
+import { stellarClient as defaultStellarClient, StellarClient } from '../clients/stellar.client.js'
 import { AppError, ErrorCode } from '../utils/AppError.js'
 import type { WalletServiceDeps } from '../container/types.js'
 
-const HORIZON_URL = process.env.HORIZON_URL || 'https://horizon-testnet.stellar.org'
-const FRIENDBOT_URL = 'https://friendbot-testnet.stellar.org/bump_sequence'
-
 /**
- * Maps an upstream Horizon/friendbot HTTP status to an application ErrorCode
- * so failures surface with a consistent error contract regardless of origin.
+ * WalletService encapsulates wallet business logic.
+ * It orchestrates between the StellarClient (network operations) and
+ * WalletRepository (persistence layer).
  */
-function upstreamErrorCode(status: number): ErrorCode {
-  if (status === 404) return ErrorCode.NOT_FOUND
-  if (status >= 500) return ErrorCode.SERVICE_UNAVAILABLE
-  return ErrorCode.VALIDATION_ERROR
-}
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-export function createWalletService(deps: WalletServiceDeps) {
-  const { walletRepository: repo } = deps
+export interface WalletServiceDeps {
+  walletRepository?: typeof defaultWalletRepository
+  stellarClient?: StellarClient
+}
+
+export function createWalletService(deps: WalletServiceDeps = {}) {
+  const { walletRepository: repo = defaultWalletRepository, stellarClient = defaultStellarClient } = deps
 
   return {
     /**
@@ -26,7 +25,7 @@ export function createWalletService(deps: WalletServiceDeps) {
      * Fetches current balance and sequence from Horizon.
      */
     async syncStellarAccount(userId: string, publicKey: string) {
-      const accountInfo = await getAccountInfo(publicKey)
+      const accountInfo = await stellarClient.getAccountInfo(publicKey)
 
       return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
     },
@@ -63,7 +62,7 @@ export function createWalletService(deps: WalletServiceDeps) {
         throw new AppError('Source account not found', 404, true, ErrorCode.NOT_FOUND)
       }
 
-      const current = await getAccountInfo(sourcePublicKey)
+      const current = await stellarClient.getAccountInfo(sourcePublicKey)
       const nextSequence = (current.sequence + BigInt(1)).toString()
 
       return {
@@ -80,7 +79,7 @@ export function createWalletService(deps: WalletServiceDeps) {
      * Register a user's Stellar account for the first time.
      */
     async linkStellarAccount(userId: string, publicKey: string) {
-      await getAccountInfo(publicKey)
+      await stellarClient.getAccountInfo(publicKey)
 
       const existing = await repo.findByPublicKey(publicKey)
 
@@ -88,149 +87,37 @@ export function createWalletService(deps: WalletServiceDeps) {
         throw new AppError('Wallet already linked to another account', 409, true, ErrorCode.CONFLICT)
       }
 
-      const accountInfo = await getAccountInfo(publicKey)
+      const accountInfo = await stellarClient.getAccountInfo(publicKey)
       return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
     },
   }
 }
 
-// ── Standalone Horizon/network helpers (no DB involvement) ────────────────────
+// ── Standalone Stellar network helpers (for backward compatibility) ──────────
+// These re-export from StellarClient for callers not yet using the new client directly
 
-/**
- * Fetch account balance and sequence from Horizon.
- * @throws AppError if account not found or network error
- */
 export async function getAccountInfo(publicKey: string) {
-  const response = await fetch(`${HORIZON_URL}/accounts/${publicKey}`)
-
-  if (response.status === 404) {
-    throw new AppError('Account not found on Stellar network', 404, true, ErrorCode.NOT_FOUND)
-  }
-
-  if (!response.ok) {
-    throw new AppError(
-      `Stellar network error: ${response.statusText}`,
-      response.status,
-      true,
-      upstreamErrorCode(response.status),
-    )
-  }
-
-  const data = (await response.json()) as {
-    balances: Array<{ balance: string; asset_type: string }>
-    sequence: string
-  }
-
-  const nativeBalance = data.balances.find((b) => b.asset_type === 'native')
-  const balance = nativeBalance ? parseFloat(nativeBalance.balance) : 0
-
-  return {
-    publicKey,
-    balance,
-    sequence: BigInt(data.sequence),
-  }
+  return defaultStellarClient.getAccountInfo(publicKey)
 }
 
-/**
- * Submit a signed XDR transaction to Stellar network.
- */
 export async function broadcastTransaction(signedXdr: string) {
-  const response = await fetch(`${HORIZON_URL}/transactions`, {
-    method: 'POST',
-    body: new URLSearchParams({ tx: signedXdr }),
-  })
-
-  if (!response.ok) {
-    const error = (await response.json()) as { title?: string; detail?: string }
-    throw new AppError(
-      `Broadcast failed: ${error.detail || error.title}`,
-      response.status,
-      true,
-      upstreamErrorCode(response.status),
-    )
-  }
-
-  const result = (await response.json()) as { hash: string; id: string }
-  return { txHash: result.hash, txId: result.id }
+  return defaultStellarClient.broadcastTransaction(signedXdr)
 }
 
-/**
- * Poll transaction status from Horizon.
- */
 export async function pollTransactionStatus(txHash: string) {
-  const response = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
-
-  if (response.status === 404) {
-    return { status: 'pending' }
-  }
-
-  if (!response.ok) {
-    throw new AppError(
-      'Failed to fetch transaction status',
-      response.status,
-      true,
-      upstreamErrorCode(response.status),
-    )
-  }
-
-  const tx = (await response.json()) as { successful: boolean; result_code: string }
-
-  return {
-    status: tx.successful ? 'confirmed' : 'failed',
-    resultCode: tx.result_code,
-  }
+  return defaultStellarClient.pollTransactionStatus(txHash)
 }
 
-/**
- * Fund testnet account via friendbot.
- */
 export async function fundTestnetAccount(publicKey: string) {
-  const response = await fetch(FRIENDBOT_URL, {
-    method: 'POST',
-    body: JSON.stringify({ account: publicKey }),
-    headers: { 'Content-Type': 'application/json' },
-  })
-
-  if (!response.ok) {
-    const error = (await response.json()) as { error?: string }
-    throw new AppError(
-      `Friendbot failed: ${error.error || response.statusText}`,
-      response.status,
-      true,
-      upstreamErrorCode(response.status),
-    )
-  }
-
-  const result = (await response.json()) as { hash: string }
-  return { txHash: result.hash, message: 'Account funded successfully' }
+  return defaultStellarClient.fundTestnetAccount(publicKey)
 }
 
-/**
- * Get transaction history for a Stellar account from Horizon.
- */
 export async function getAccountTransactions(
   publicKey: string,
   limit = 50,
   order: 'asc' | 'desc' = 'desc',
 ) {
-  const response = await fetch(
-    `${HORIZON_URL}/accounts/${publicKey}/transactions?limit=${limit}&order=${order}`,
-  )
-
-  if (!response.ok) {
-    throw new AppError(
-      'Failed to fetch transactions',
-      response.status,
-      true,
-      upstreamErrorCode(response.status),
-    )
-  }
-
-  const data = (await response.json()) as {
-    _embedded: { records: Array<{ hash: string; created_at: string }> }
-  }
-
-  return data._embedded.records
+  return defaultStellarClient.getAccountTransactions(publicKey, limit, order)
 }
 
 // ── Default service instance (backward-compatible module-level API) ───────────
