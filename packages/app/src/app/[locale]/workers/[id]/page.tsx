@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import PortfolioGallery from "@/components/PortfolioGallery";
+import dynamic from "next/dynamic";
 import ReviewsSection from "@/components/ReviewsSection";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import VerificationBadges from "@/components/VerificationBadges";
@@ -12,6 +12,9 @@ import { WorkerHeader } from "./components/WorkerHeader";
 import { WorkerContactDetails } from "./components/WorkerContactDetails";
 import { WorkerTipSection } from "./components/WorkerTipSection";
 import type { Worker, ApiResponse, Review, RatingDistributionEntry } from "@/types";
+
+// Below-the-fold widget — split out so it isn't bundled into the initial route chunk.
+const PortfolioGallery = dynamic(() => import("@/components/PortfolioGallery"));
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
 

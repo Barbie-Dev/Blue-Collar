@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { db } from '../db.js'
 import { paginate } from '../utils/paginate.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 
 export async function listUsers(req: Request, res: Response) {
   const { page = '1', limit = '20', search, role, status } = req.query as Record<string, string | undefined>
@@ -34,8 +35,8 @@ export async function listUsers(req: Request, res: Response) {
 
 export async function suspendUser(req: Request, res: Response) {
   const user = await db.user.findUnique({ where: { id: req.params.id } })
-  if (!user) return res.status(404).json({ status: 'error', message: 'User not found', code: 404 })
-  if (user.role === 'admin') return res.status(403).json({ status: 'error', message: 'Cannot suspend another admin', code: 403 })
+  if (!user) throw new AppError('User not found', 404, true, ErrorCode.NOT_FOUND)
+  if (user.role === 'admin') throw new AppError('Cannot suspend another admin', 403, true, ErrorCode.FORBIDDEN)
 
   await db.user.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } })
   await db.auditLog.create({
@@ -48,7 +49,7 @@ async function bulkSetUserSuspension(req: Request, res: Response, suspend: boole
   const { ids } = req.body as { ids?: unknown }
 
   if (!Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ status: 'error', message: 'ids must be a non-empty array', code: 400 })
+    throw new AppError('ids must be a non-empty array', 400, true, ErrorCode.VALIDATION_ERROR)
   }
 
   const targets = await db.user.findMany({
@@ -89,7 +90,7 @@ export async function bulkUnsuspendUsers(req: Request, res: Response) {
 
 export async function unsuspendUser(req: Request, res: Response) {
   const user = await db.user.findUnique({ where: { id: req.params.id } })
-  if (!user) return res.status(404).json({ status: 'error', message: 'User not found', code: 404 })
+  if (!user) throw new AppError('User not found', 404, true, ErrorCode.NOT_FOUND)
 
   await db.user.update({ where: { id: req.params.id }, data: { deletedAt: null } })
   await db.auditLog.create({
@@ -100,8 +101,8 @@ export async function unsuspendUser(req: Request, res: Response) {
 
 export async function banUser(req: Request, res: Response) {
   const user = await db.user.findUnique({ where: { id: req.params.id } })
-  if (!user) return res.status(404).json({ status: 'error', message: 'User not found', code: 404 })
-  if (user.role === 'admin') return res.status(403).json({ status: 'error', message: 'Cannot ban another admin', code: 403 })
+  if (!user) throw new AppError('User not found', 404, true, ErrorCode.NOT_FOUND)
+  if (user.role === 'admin') throw new AppError('Cannot ban another admin', 403, true, ErrorCode.FORBIDDEN)
 
   await db.user.update({
     where: { id: req.params.id },
@@ -116,13 +117,13 @@ export async function banUser(req: Request, res: Response) {
 export async function changeRole(req: Request, res: Response) {
   const { role } = req.body as { role?: string }
   if (!role || !['user', 'curator', 'admin'].includes(role)) {
-    return res.status(400).json({ status: 'error', message: 'role must be one of: user, curator, admin', code: 400 })
+    throw new AppError('role must be one of: user, curator, admin', 400, true, ErrorCode.VALIDATION_ERROR)
   }
 
   const user = await db.user.findUnique({ where: { id: req.params.id } })
-  if (!user) return res.status(404).json({ status: 'error', message: 'User not found', code: 404 })
+  if (!user) throw new AppError('User not found', 404, true, ErrorCode.NOT_FOUND)
   if (user.role === 'admin' && req.user!.id !== user.id) {
-    return res.status(403).json({ status: 'error', message: 'Cannot change role of another admin', code: 403 })
+    throw new AppError('Cannot change role of another admin', 403, true, ErrorCode.FORBIDDEN)
   }
 
   const updated = await db.user.update({

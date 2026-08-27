@@ -1,5 +1,8 @@
-import TipModal from "@/components/TipModal";
+import dynamic from "next/dynamic";
 import TransactionList from "@/components/TransactionList";
+
+// Pulls in @stellar/stellar-sdk — split out so it isn't bundled into the initial route chunk.
+const TipModal = dynamic(() => import("@/components/TipModal"));
 
 interface Props {
   workerName: string;
