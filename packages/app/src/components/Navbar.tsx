@@ -9,7 +9,7 @@ import { useTheme } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallet } from "@/hooks/useWallet";
 import { useLocale, useTranslations } from "next-intl";
-import { cn } from "@/lib/utils";
+import { cn, formatStellarAddress } from "@/lib/utils";
 import NotificationDropdown from "@/components/NotificationDropdown";
 
 const LANGUAGES = [
@@ -154,7 +154,7 @@ export default function Navbar() {
     touchStartX.current = null;
   };
 
-  const shortAddress = publicKey ? `${publicKey.slice(0, 4)}…${publicKey.slice(-4)}` : null;
+  const shortAddress = publicKey ? formatStellarAddress(publicKey) : null;
 
   const handleLanguageChange = (newLocale: string) => {
     router.push(pathname.replace(`/${locale}`, `/${newLocale}`));
