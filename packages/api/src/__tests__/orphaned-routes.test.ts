@@ -81,9 +81,6 @@ describe('Route Registration Guard', () => {
         'admin-workers.controller',
         'admin-audit.controller',
         'admin-stats.controller',
-        'worker-crud.controller',
-        'worker-search.controller',
-        'worker-reputation.controller',
       ].includes(controllerFile)
 
       if (!isUtilityController) {
