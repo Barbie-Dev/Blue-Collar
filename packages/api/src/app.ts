@@ -243,10 +243,50 @@ app.use('/api', deprecationWarning, (req, res) => {
   res.redirect(301, target)
 })
 
+// ── Health check endpoints ────────────────────────────────────────────────────
+// /healthz: lightweight liveness probe (service is running)
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ status: 'ok' })
+})
+
+// /health: legacy liveness probe (kept for backward compatibility)
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok' })
 })
 
+// /readyz: readiness probe (service is ready to handle traffic)
+// Checks DB and Redis connectivity before declaring ready
+app.get('/readyz', async (_req, res) => {
+  const checks: Record<string, { status: 'ok' | 'error'; latencyMs?: number; error?: string }> = {}
+
+  // Database check
+  const dbStart = Date.now()
+  try {
+    await db.$queryRaw`SELECT 1`
+    checks.database = { status: 'ok', latencyMs: Date.now() - dbStart }
+  } catch (err) {
+    checks.database = { status: 'error', latencyMs: Date.now() - dbStart, error: getErrorMessage(err) }
+  }
+
+  // Redis check
+  const redisStart = Date.now()
+  try {
+    await redis.ping()
+    checks.redis = { status: 'ok', latencyMs: Date.now() - redisStart }
+  } catch (err) {
+    checks.redis = { status: 'error', latencyMs: Date.now() - redisStart, error: getErrorMessage(err) }
+  }
+
+  const allOk = Object.values(checks).every((c) => c.status === 'ok')
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ok' : 'degraded',
+    service: 'bluecollar-api',
+    checks,
+    timestamp: new Date().toISOString(),
+  })
+})
+
+// /ready: legacy readiness probe (kept for backward compatibility)
 app.get('/ready', async (_req, res) => {
   const checks: Record<string, { status: 'ok' | 'error'; latencyMs?: number; error?: string }> = {}
 

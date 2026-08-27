@@ -1,12 +1,23 @@
 import { walletRepository as defaultWalletRepository } from '../repositories/wallet.repository.js'
-import { AppError } from '../utils/AppError.js'
+import { stellarClient as defaultStellarClient, StellarClient } from '../clients/stellar.client.js'
+import { AppError, ErrorCode } from '../utils/AppError.js'
 import type { WalletServiceDeps } from '../container/types.js'
-import { stellarRpcClient } from './stellar-rpc.client.js'
+
+/**
+ * WalletService encapsulates wallet business logic.
+ * It orchestrates between the StellarClient (network operations) and
+ * WalletRepository (persistence layer).
+ */
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-export function createWalletService(deps: WalletServiceDeps) {
-  const { walletRepository: repo } = deps
+export interface WalletServiceDeps {
+  walletRepository?: typeof defaultWalletRepository
+  stellarClient?: StellarClient
+}
+
+export function createWalletService(deps: WalletServiceDeps = {}) {
+  const { walletRepository: repo = defaultWalletRepository, stellarClient = defaultStellarClient } = deps
 
   return {
     /**
@@ -14,7 +25,7 @@ export function createWalletService(deps: WalletServiceDeps) {
      * Fetches current balance and sequence from Horizon.
      */
     async syncStellarAccount(userId: string, publicKey: string) {
-      const accountInfo = await stellarRpcClient.getAccountInfo(publicKey)
+      const accountInfo = await stellarClient.getAccountInfo(publicKey)
 
       return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
     },
@@ -51,7 +62,7 @@ export function createWalletService(deps: WalletServiceDeps) {
         throw new AppError('Source account not found', 404, true, ErrorCode.NOT_FOUND)
       }
 
-      const current = await getAccountInfo(sourcePublicKey)
+      const current = await stellarClient.getAccountInfo(sourcePublicKey)
       const nextSequence = (current.sequence + BigInt(1)).toString()
 
       return {
@@ -68,7 +79,7 @@ export function createWalletService(deps: WalletServiceDeps) {
      * Register a user's Stellar account for the first time.
      */
     async linkStellarAccount(userId: string, publicKey: string) {
-      await stellarRpcClient.getAccountInfo(publicKey)
+      await stellarClient.getAccountInfo(publicKey)
 
       const existing = await repo.findByPublicKey(publicKey)
 
@@ -76,51 +87,37 @@ export function createWalletService(deps: WalletServiceDeps) {
         throw new AppError('Wallet already linked to another account', 409, true, ErrorCode.CONFLICT)
       }
 
-      const accountInfo = await stellarRpcClient.getAccountInfo(publicKey)
+      const accountInfo = await stellarClient.getAccountInfo(publicKey)
       return repo.upsertAccount(publicKey, userId, accountInfo.balance, accountInfo.sequence)
     },
   }
 }
 
-// ── Standalone Horizon/network helpers (delegate to StellarRpcClient) ────────────
+// ── Standalone Stellar network helpers (for backward compatibility) ──────────
+// These re-export from StellarClient for callers not yet using the new client directly
 
-/**
- * Fetch account balance and sequence from Horizon.
- */
 export async function getAccountInfo(publicKey: string) {
-  return stellarRpcClient.getAccountInfo(publicKey)
+  return defaultStellarClient.getAccountInfo(publicKey)
 }
 
-/**
- * Submit a signed XDR transaction to Stellar network.
- */
 export async function broadcastTransaction(signedXdr: string) {
-  return stellarRpcClient.broadcastTransaction(signedXdr)
+  return defaultStellarClient.broadcastTransaction(signedXdr)
 }
 
-/**
- * Poll transaction status from Horizon.
- */
 export async function pollTransactionStatus(txHash: string) {
-  return stellarRpcClient.pollTransactionStatus(txHash)
+  return defaultStellarClient.pollTransactionStatus(txHash)
 }
 
-/**
- * Fund testnet account via friendbot.
- */
 export async function fundTestnetAccount(publicKey: string) {
-  return stellarRpcClient.fundTestnetAccount(publicKey)
+  return defaultStellarClient.fundTestnetAccount(publicKey)
 }
 
-/**
- * Get transaction history for a Stellar account from Horizon.
- */
 export async function getAccountTransactions(
   publicKey: string,
   limit = 50,
   order: 'asc' | 'desc' = 'desc',
 ) {
-  return stellarRpcClient.getAccountTransactions(publicKey, limit, order)
+  return defaultStellarClient.getAccountTransactions(publicKey, limit, order)
 }
 
 // ── Default service instance (backward-compatible module-level API) ───────────
