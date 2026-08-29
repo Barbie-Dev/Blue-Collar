@@ -2,14 +2,15 @@ import { Router } from 'express'
 import * as walletController from '../controllers/wallet.js'
 import { authenticate as requireAuth } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
+import { publicReadRateLimiter, publicWriteRateLimiter } from '../config/rateLimiter.js'
 import { linkWalletRules, buildTxRules, broadcastRules, fundTestnetRules } from '../validations/index.js'
 
 const router = Router()
 
 // Public endpoints - no auth required
-router.get('/account/:publicKey', walletController.getAccountInfo)
-router.post('/testnet-fund', validate(fundTestnetRules), walletController.fundTestnet)
-router.get('/transactions/:publicKey', walletController.getTransactions)
+router.get('/account/:publicKey', publicReadRateLimiter, walletController.getAccountInfo)
+router.post('/testnet-fund', publicWriteRateLimiter, validate(fundTestnetRules), walletController.fundTestnet)
+router.get('/transactions/:publicKey', publicReadRateLimiter, walletController.getTransactions)
 
 // Protected endpoints - auth required
 router.get('/balance', requireAuth, walletController.getBalance)
